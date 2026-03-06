@@ -1,0 +1,28 @@
+[workspace]
+# Path-based members
+members = [
+        "bin/rok-host",
+        "lib/rok-engine",
+        "crates/rok-abi",
+        "crates/rok-core",
+        "crates/rok-dag",
+]
+resolver = "2"
+
+# --- Workspace Inheritance ---
+# This defines shared metadata.
+[workspace.package]
+version = "0.1.0"
+authors = ["Viktor Lindbäck"]
+edition = "2024"
+
+# Define common dependencies here once
+[workspace.dependencies]
+rok-abi = { path = "crates/rok-abi" }
+rok-core = { path = "crates/rok-core" }
+rok-dag = { path = "crates/rok-dag" }
+# External dependencies
+crossbeam = "0.8"
+
+[profile.dev.package."*"]
+opt-level = 3
