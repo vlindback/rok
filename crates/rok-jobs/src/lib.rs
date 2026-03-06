@@ -15,6 +15,7 @@ mod job_record;
 mod job_scheduler;
 mod job_system;
 mod job_worker;
+mod job_worker_tls;
 
 // Exports:
 

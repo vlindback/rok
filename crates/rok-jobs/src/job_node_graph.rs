@@ -46,4 +46,10 @@ impl JobNodeGraph {
         let node = unsafe { self.pool.get_node_unchecked(node_handle) };
         node.arm(prio, deps, fence, record, job);
     }
+
+    pub(crate) fn execute_node(&self, handle: JobNodeHandle) {
+        if let Some(node) = self.pool.get_node(&handle) {
+            node.run_job();
+        }
+    }
 }
