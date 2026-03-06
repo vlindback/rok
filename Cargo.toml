@@ -5,7 +5,7 @@ members = [
         "lib/rok-engine",
         "crates/rok-abi",
         "crates/rok-core",
-        "crates/rok-dag",
+        "crates/rok-jobs",
 ]
 resolver = "2"
 
@@ -20,7 +20,7 @@ edition = "2024"
 [workspace.dependencies]
 rok-abi = { path = "crates/rok-abi" }
 rok-core = { path = "crates/rok-core" }
-rok-dag = { path = "crates/rok-dag" }
+rok-jobs = { path = "crates/rok-jobs" }
 # External dependencies
 crossbeam = "0.8"
 

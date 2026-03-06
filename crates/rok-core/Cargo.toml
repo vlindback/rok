@@ -5,5 +5,10 @@ authors.workspace = true # Inherits authors from root
 edition.workspace = true # Inherits 2024 from root
 
 [dependencies]
-# No version needed here if defined in root workspace.dependencies
-log.workspace = true
+rok-abi.workspace = true
+rok-jobs.workspace = true
+
+# Without rok-core, rok-engine DLL would have to manually link 20 different crates.
+# rok-core bundles them together. It’s the "Glue" that takes the concrete rok-jobs
+# and plugs it into the rok-abi slots.
+#

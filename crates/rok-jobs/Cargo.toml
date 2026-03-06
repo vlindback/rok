@@ -1,10 +1,11 @@
 [package]
-name = "rok-dag"
+name = "rok-jobs"
 version.workspace = true # Inherits 0.1.0 from root
 authors.workspace = true # Inherits authors from root
 edition.workspace = true # Inherits 2024 from root
 
 [dependencies]
-# No version needed here if defined in root workspace.dependencies
-log.workspace = true
+# internal
+rok-abi.workspace = true
+#external
 crossbeam.workspace = true
