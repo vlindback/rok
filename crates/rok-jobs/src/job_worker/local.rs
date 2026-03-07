@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crossbeam::{deque::Worker, sync::Parker};
 
 use crate::{
-    job_node_handle::JobNodeHandle,
+    job_pool::JobIndex,
     job_priority::JobPriority,
     job_scheduler::JobScheduler,
     job_worker::{JobWorkerInit, JobWorkerShared, send_ptr::SendPtr},
@@ -18,7 +18,7 @@ pub(crate) struct JobWorkerLocal {
     pub(crate) scheduler: Arc<JobScheduler>,
     pub(crate) shared: SendPtr<JobWorkerShared>,
     pub(crate) parker: Parker,
-    deques: [Worker<JobNodeHandle>; JobPriority::COUNT],
+    deques: [Worker<JobIndex>; JobPriority::COUNT],
 }
 
 impl JobWorkerLocal {
@@ -41,37 +41,45 @@ impl JobWorkerLocal {
 
     pub(crate) fn shared(&self) -> &JobWorkerShared {
         // SAFETY: shared is guaranteed non-null and valid for the lifetime of
-        // this JobWorkerLocal, as the scheduler owns the Box<[JobWorkerShared]>
+        // this JobWorkerLocal, as the scheduler owns the Vec<JobWorkerShared>
         // and outlives all workers via Arc<JobScheduler>.
         unsafe { &*self.shared.0 }
     }
 
-    pub(crate) fn push_work(&self, task: JobNodeHandle, prio: JobPriority) {
+    pub(crate) fn push_work(&self, index: JobIndex, prio: JobPriority) {
         let deque = unsafe { self.deques.get_unchecked(prio.index()) };
-        deque.push(task);
+        deque.push(index);
     }
 
-    pub(crate) fn pop_local(&self) -> Option<JobNodeHandle> {
+    pub(crate) fn pop_local(&self) -> Option<JobIndex> {
         for prio in JobPriority::ALL {
-            let i = prio.index();
-            let deque = &self.deques[i];
-            if let Some(handle) = deque.pop() {
-                return Some(handle);
+            if let Some(index) = self.deques[prio.index()].pop() {
+                return Some(index);
             }
         }
         None
     }
 
-    pub(crate) fn drain_shared_inbox(&self, prio: JobPriority) {
+    pub(crate) fn drain_shared_inbox(&self, prio: JobPriority) -> bool {
         let deque = unsafe { self.deques.get_unchecked(prio.index()) };
         self.shared().drain_inbox_into(prio, |item| {
             deque.push(item);
-        });
+        })
     }
 
     #[inline]
-    pub fn has_work_anywhere(&self) -> bool {
-        // Check local deque, inbox, and maybe do a quick peek at stealers
-        !self.local_deque_is_empty() || !self.inbox_is_empty()
+    pub(crate) fn has_work_anywhere(&self) -> bool {
+        !self.local_deques_empty() || !self.inbox_empty()
+    }
+
+    fn local_deques_empty(&self) -> bool {
+        self.deques.iter().all(|d| d.is_empty())
+    }
+
+    fn inbox_empty(&self) -> bool {
+        let shared = self.shared();
+        JobPriority::ALL
+            .iter()
+            .all(|p| shared.inboxes[p.index()].is_empty())
     }
 }

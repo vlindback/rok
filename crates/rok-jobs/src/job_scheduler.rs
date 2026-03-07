@@ -1,66 +1,59 @@
 // job_scheduler.rs
 
-use std::any::Any;
 use std::num::{NonZeroU32, NonZeroUsize};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crossbeam::deque::{Stealer, Worker};
 use crossbeam::queue::ArrayQueue;
 use crossbeam::sync::Parker;
 
-use crate::JobFence;
 use crate::job::Job;
-use crate::job_node_graph::JobNodeGraph;
-use crate::job_node_handle::JobNodeHandle;
+use crate::job_fence::JobFence;
+use crate::job_pool::{JobIndex, JobPool};
 use crate::job_priority::JobPriority;
 use crate::job_record::JobRecord;
 use crate::job_worker::{JobWorkerHandle, JobWorkerInit, JobWorkerShared};
 use crate::job_worker_tls::get_job_worker_local_tls;
 use crate::stop::StopSource;
+use crate::tsc_timer::TscTimer;
 
 pub(crate) struct JobScheduler {
     stop_source: StopSource,
-    graph: JobNodeGraph,
+    pool: JobPool,
     workers: Vec<JobWorkerShared>,
     worker_handles: Vec<JobWorkerHandle>,
     rr_counter: AtomicUsize,
-    poisoned: AtomicBool,
-    panic_payload: Mutex<Option<Box<dyn Any + Send>>>,
 }
 
 #[derive(Default)]
-pub(crate) struct JobSchedulerConfig {
-    // How many nodes the graph owned by the scheduler have.
-    graph_node_capacity: Option<NonZeroU32>,
+pub struct JobSchedulerConfig {
+    /// How many jobs the pool can hold concurrently.
+    pub pool_capacity: Option<NonZeroU32>,
 
-    // How large each workers inbox is for work.
-    worker_inbox_capacity: Option<NonZeroU32>,
+    /// How large each worker's inbox is.
+    pub worker_inbox_capacity: Option<NonZeroU32>,
 
-    // How many workers exist.
-    worker_count: Option<NonZeroU32>,
+    /// How many worker threads to spawn.
+    pub worker_count: Option<NonZeroU32>,
 }
 
 impl JobScheduler {
     pub(crate) fn with_config(config: JobSchedulerConfig) -> Arc<Self> {
-        /// Default minimum capacity for the job node graph storage.
-
-        const MIN_GRAPH_NODES: NonZeroU32 = match NonZeroU32::new(128) {
+        const MIN_POOL_CAP: NonZeroU32 = match NonZeroU32::new(128) {
             Some(n) => n,
             None => unreachable!(),
         };
-
-        /// Default minimum capacity for worker job inboxes.
 
         const MIN_INBOX_CAP: NonZeroU32 = match NonZeroU32::new(32) {
             Some(n) => n,
             None => unreachable!(),
         };
 
-        let graph_node_capacity = config
-            .graph_node_capacity
-            .unwrap_or(MIN_GRAPH_NODES)
-            .max(MIN_GRAPH_NODES);
+        let pool_capacity = config
+            .pool_capacity
+            .unwrap_or(MIN_POOL_CAP)
+            .max(MIN_POOL_CAP);
 
         let worker_count = decide_worker_count(&config).get();
 
@@ -81,13 +74,13 @@ impl JobScheduler {
             let parker = Parker::new();
             let unparker = parker.unparker().clone();
 
-            let deques: [Worker<JobNodeHandle>; JobPriority::COUNT] =
+            let deques: [Worker<JobIndex>; JobPriority::COUNT] =
                 std::array::from_fn(|_| Worker::new_lifo());
 
-            let stealers: [Stealer<JobNodeHandle>; JobPriority::COUNT] =
+            let stealers: [Stealer<JobIndex>; JobPriority::COUNT] =
                 std::array::from_fn(|i| deques[i].stealer());
 
-            let inboxes: [ArrayQueue<JobNodeHandle>; JobPriority::COUNT] =
+            let inboxes: [ArrayQueue<JobIndex>; JobPriority::COUNT] =
                 std::array::from_fn(|_| ArrayQueue::new(worker_inbox_cap));
 
             shared_vec.push(JobWorkerShared {
@@ -100,24 +93,22 @@ impl JobScheduler {
         }
 
         //
-        // Pass 2: freeze the shared slice inside the Arc - addresses are now stable
+        // Pass 2: freeze shared slice inside Arc — addresses are now stable
         //
 
         let mut scheduler = Arc::new(JobScheduler {
             stop_source: StopSource::new(),
-            graph: JobNodeGraph::with_capacity(graph_node_capacity),
+            pool: JobPool::with_capacity(pool_capacity),
             workers: shared_vec,
             worker_handles: Vec::new(),
             rr_counter: AtomicUsize::new(0),
-            poisoned: AtomicBool::new(false),
-            panic_payload: Mutex::new(None),
         });
 
         //
-        // Pass 3: Spawn the workers.
+        // Pass 3: spawn workers
         //
 
-        let workers = worker_inits
+        let worker_handles = worker_inits
             .into_iter()
             .enumerate()
             .map(|(id, init)| {
@@ -131,12 +122,9 @@ impl JobScheduler {
             })
             .collect();
 
-        // expect() string is technically dead weight in release builds but serves
-        // as documentation for future contributors. Remove if binary size becomes
-        // a concern.
         Arc::get_mut(&mut scheduler)
             .expect("no external Arc clones exist before workers are published")
-            .worker_handles = workers;
+            .worker_handles = worker_handles;
 
         scheduler
     }
@@ -144,52 +132,59 @@ impl JobScheduler {
     pub(crate) fn schedule<F>(
         &self,
         prio: JobPriority,
-        fence: Option<&JobFence>,
-        record: Option<&JobRecord>,
+        fence: Option<*const JobFence>,
+        record: Option<*const JobRecord>,
         f: F,
     ) where
         F: FnOnce() + Send + 'static,
     {
-        let deps: u32 = 0;
-        let node_handle: JobNodeHandle = self.graph.allocate_node();
-        let job = Job::new(f);
-        self.graph
-            .arm_node(&node_handle, prio, deps, fence, record, job);
+        // Increment the fence BEFORE pushing the job to any worker.
+        // If we incremented after, the job could complete and decrement
+        // before we increment, causing a spurious wakeup at count 0.
+        if let Some(fence) = fence {
+            unsafe {
+                (*fence).increment(1);
+            }
+        }
 
-        if let Some(worker_local_ctx) = get_job_worker_local_tls() {
-            // Fast path: push directly to local worker.
+        let mut job = Job::new(f, fence, record);
+        let index = loop {
+            match self.pool.try_push(job) {
+                Ok(idx) => break idx,
+                Err(returned_job) => {
+                    job = returned_job;
+                    std::hint::spin_loop();
+                    std::thread::yield_now();
+                }
+            }
+        };
 
-            // crossbeam::deque::worker is single producer but here we are in the producer thread.
-            worker_local_ctx.push_work(node_handle, prio);
+        if let Some(worker_local) = get_job_worker_local_tls() {
+            // Fast path: we are on a worker thread, push directly to local deque.
+            worker_local.push_work(index, prio);
 
-            // NOTE: it is crucial here that we wake up someone else than ourselves.
-            // if we are the only worker thread and a job spawns 1000 jobs they will
-            // all run single-threaded unless we start waking up another thread to
-            // help stealing.
-
-            let neighbor_idx = (worker_local_ctx.id + 1) % self.workers.len();
-            let neighbor: &JobWorkerShared = unsafe { self.workers.get_unchecked(neighbor_idx) };
+            // Wake a neighbor so they can steal if we produce many jobs.
+            let neighbor_idx = (worker_local.id + 1) % self.workers.len();
+            let neighbor = unsafe { self.workers.get_unchecked(neighbor_idx) };
             neighbor.unparker.unpark();
         } else {
-            // Round-robin pick a worker and add to that workers inbox.
-
-            // The modulo ensures index is always < workers.len()
-            let worker_index = self.rr_counter.fetch_add(1, Ordering::Relaxed) % self.workers.len();
-            let worker: &JobWorkerShared = unsafe { self.workers.get_unchecked(worker_index) };
-            worker.push_to_inbox(node_handle, prio);
+            // External thread: round-robin into a worker inbox.
+            let worker_idx = self.rr_counter.fetch_add(1, Ordering::Relaxed) % self.workers.len();
+            let worker = unsafe { self.workers.get_unchecked(worker_idx) };
+            worker.push_to_inbox(index, prio);
             worker.unparker.unpark();
         }
     }
 
-    pub(crate) fn run_job(&self, handle: JobNodeHandle) {
-        self.graph.execute_node(handle);
+    pub(crate) fn run_job(&self, index: JobIndex) {
+        // Safety: index was produced by try_push and has not been executed yet.
+        unsafe { self.pool.execute_and_free(index) }
     }
 }
 
 impl Drop for JobScheduler {
     fn drop(&mut self) {
         self.stop_source.request_stop();
-
         for worker in self.worker_handles.drain(..) {
             worker.join();
         }
@@ -197,10 +192,7 @@ impl Drop for JobScheduler {
 }
 
 fn decide_worker_count(config: &JobSchedulerConfig) -> NonZeroUsize {
-    // Minimum 1, perferably optimal - 1, where optimal = available_parallelism.
-    // sub for main spawning thread, optimizing for 1 scheduler and 1 main thread.
-
-    let count: usize = config
+    let count = config
         .worker_count
         .map(|n| n.get() as usize)
         .unwrap_or_else(|| {
@@ -209,9 +201,6 @@ fn decide_worker_count(config: &JobSchedulerConfig) -> NonZeroUsize {
                 .unwrap_or(4)
         });
 
-    // Safety:
-    // 1. If it came from worker_count, it was already a NonZeroU32.
-    // 2. If it came from available_parallelism, we used .max(1).
-    // 3. If it fell back to the constant, 4 is > 0.
+    // Safety: all three branches produce a value >= 1.
     NonZeroUsize::new(count).unwrap()
 }

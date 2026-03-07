@@ -2,41 +2,57 @@
 
 use core::mem::{MaybeUninit, align_of, size_of};
 
+use crate::{job_fence::JobFence, job_record::JobRecord};
+
 const JOB_SIZE: usize = 64;
 const JOB_ALIGN: usize = 16;
+
+// Type aliases so size_of works cleanly in the storage size calculation.
+type RunFn = unsafe fn(*mut u8);
+type DropFn = unsafe fn(*mut u8);
 
 #[repr(C, align(16))]
 pub struct Aligned<const N: usize>(pub [u8; N]);
 
 #[repr(C)]
-pub struct JobHeader {
-    pub run: unsafe fn(*mut u8),
-    pub drop: unsafe fn(*mut u8),
-}
-
-#[repr(C)]
 pub struct Job {
-    header: JobHeader,
-    storage: MaybeUninit<Aligned<{ JOB_SIZE - size_of::<JobHeader>() }>>,
+    run: RunFn,
+    drop: DropFn,
+    fence: Option<*const JobFence>,
+    record: Option<*const JobRecord>,
+    storage: MaybeUninit<
+        Aligned<
+            {
+                JOB_SIZE
+                    - size_of::<RunFn>()
+                    - size_of::<DropFn>()
+                    - size_of::<Option<*const JobFence>>()
+            },
+        >,
+    >,
 }
 
 impl Job {
     /// A constant representing a no-op job.
     pub const NOOP: Self = Self {
-        header: JobHeader {
-            run: noop_run,
-            drop: noop_drop,
-        },
+        run: noop_run,
+        drop: noop_drop,
+        fence: None,
+        record: None,
         storage: MaybeUninit::uninit(),
     };
 
-    pub fn new<F>(f: F) -> Self
+    pub fn new<F>(f: F, fence: Option<*const JobFence>, record: Option<*const JobRecord>) -> Self
     where
         F: FnOnce() + Send + 'static,
     {
         const {
             assert!(
-                size_of::<F>() <= JOB_SIZE - size_of::<JobHeader>(),
+                size_of::<F>()
+                    <= JOB_SIZE
+                        - size_of::<RunFn>()
+                        - size_of::<DropFn>()
+                        - size_of::<Option<*const JobFence>>(),
                 "Closure too large for Job slot!"
             );
             assert!(
@@ -46,29 +62,23 @@ impl Job {
         }
 
         fn run_impl<F: FnOnce()>(ptr: *mut u8) {
-            let f_ptr = ptr.cast::<F>();
-            unsafe {
-                (f_ptr.read())(); // move + call
-            }
+            unsafe { (ptr.cast::<F>().read())() }
         }
 
         fn drop_impl<F>(ptr: *mut u8) {
-            unsafe {
-                core::ptr::drop_in_place(ptr.cast::<F>());
-            }
+            unsafe { core::ptr::drop_in_place(ptr.cast::<F>()) }
         }
 
         let mut job = Job {
-            header: JobHeader {
-                run: run_impl::<F>,
-                drop: drop_impl::<F>,
-            },
+            run: run_impl::<F>,
+            drop: drop_impl::<F>,
+            fence,
+            record,
             storage: MaybeUninit::uninit(),
         };
 
         unsafe {
-            let dst = job.storage.as_mut_ptr().cast::<F>();
-            dst.write(f);
+            job.storage.as_mut_ptr().cast::<F>().write(f);
         }
 
         job
@@ -78,25 +88,27 @@ impl Job {
     pub fn execute(&mut self) {
         unsafe {
             let ptr = self.storage.as_mut_ptr().cast::<u8>();
+            (self.run)(ptr);
+            // Prevent double-run. Drop is still valid.
+            self.run = noop_run;
+        }
 
-            // Move + run closure
-            (self.header.run)(ptr);
-
-            // Prevent future drop from running
-            self.header.drop = noop_drop;
+        if let Some(fence) = self.fence {
+            unsafe {
+                (*fence).decrement();
+            }
         }
     }
 }
-
-fn noop_drop(_: *mut u8) {}
-
-fn noop_run(_ptr: *mut u8) {}
 
 impl Drop for Job {
     fn drop(&mut self) {
         unsafe {
             let ptr = self.storage.as_mut_ptr().cast::<u8>();
-            (self.header.drop)(ptr);
+            (self.drop)(ptr);
         }
     }
 }
+
+unsafe fn noop_run(_: *mut u8) {}
+unsafe fn noop_drop(_: *mut u8) {}

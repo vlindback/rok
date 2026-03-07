@@ -16,15 +16,24 @@ pub(crate) fn job_worker_loop(local: &mut JobWorkerLocal) {
             continue;
         }
 
+        let mut has_work = false;
+
         for prio in JobPriority::ALL {
-            local.drain_shared_inbox(prio);
+            if local.drain_shared_inbox(prio) {
+                has_work = true;
+            }
         }
 
-        // 2. TODO: drain inbox then continue if we did drain it cause we got work.
+        // Found work in inbox. Skipping to next iteration to process contents.
+        if has_work {
+            continue;
+        }
+
         // 3. TODO: steal from others. if we steal execute then continue.
 
         // --- OUT OF WORK: BEGIN BACKOFF ---
-        // 4. SPIN: CPU stays hot, branch predictor stays ready.
+
+        // SPIN: CPU stays hot, branch predictor stays ready.
         let mut found_work = false;
         for _ in 0..32 {
             std::hint::spin_loop();
@@ -50,7 +59,7 @@ pub(crate) fn job_worker_loop(local: &mut JobWorkerLocal) {
         }
 
         // 6. PARK: We are completely starved. Go to sleep.
-        if local.has_work_anywhere() {
+        if !local.has_work_anywhere() {
             local.parker.park();
         }
     }
