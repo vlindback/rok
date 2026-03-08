@@ -2,6 +2,8 @@
 
 use std::{sync::Arc, thread::JoinHandle};
 
+use crossbeam::utils::CachePadded;
+
 use crate::{
     job_scheduler::JobScheduler,
     job_worker::{
@@ -22,7 +24,7 @@ impl JobWorkerHandle {
         stop_token: StopToken,
         scheduler: Arc<JobScheduler>,
         init: JobWorkerInit,
-        shared: *const JobWorkerShared,
+        shared: *const CachePadded<JobWorkerShared>,
     ) -> Self {
         let shared = SendPtr(shared);
         let join_handle = std::thread::spawn(move || {

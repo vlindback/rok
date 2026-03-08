@@ -58,7 +58,7 @@ impl JobPool {
                 // Safety: we just popped this index from the free queue,
                 // so no other thread holds a reference to this slot.
                 unsafe {
-                    *self.slots[index as usize].get() = job;
+                    *self.slots[index as usize].get() = job; // assignment drops the old Job
                 }
                 Ok(JobIndex(index))
             }
@@ -66,14 +66,19 @@ impl JobPool {
         }
     }
 
-    /// Executes the job at `index` and returns the slot to the free list.
+    /// # Safety
+    /// - `index` must have been obtained from `try_push`
+    /// - the slot must not have been freed yet
+    /// - no other reference to this slot may exist
+    pub(crate) unsafe fn get_mut(&self, index: JobIndex) -> &mut Job {
+        unsafe { &mut *self.slots[index.0 as usize].get() }
+    }
+
+    /// Returns the job at `index` to the free list.
     ///
     /// # Safety
-    /// Caller must guarantee `index` was obtained from [`try_push`] and
-    /// has not already been executed.
-    pub(crate) unsafe fn execute_and_free(&self, index: JobIndex) {
-        let job = unsafe { &mut *self.slots[index.0 as usize].get() };
-        job.execute();
+    /// Caller must guarantee `index` was obtained from [`try_push`]
+    pub(crate) unsafe fn free(&self, index: JobIndex) {
         // Return slot to free list.
         // Pushing can only fail if the queue is full, which would mean
         // more frees than allocations — a logic error.

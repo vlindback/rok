@@ -18,8 +18,8 @@ pub struct Aligned<const N: usize>(pub [u8; N]);
 pub struct Job {
     run: RunFn,
     drop: DropFn,
-    fence: Option<*const JobFence>,
-    record: Option<*const JobRecord>,
+    pub(crate) fence: Option<*const JobFence>,
+    pub(crate) record: Option<*const JobRecord>,
     storage: MaybeUninit<
         Aligned<
             {
@@ -89,8 +89,8 @@ impl Job {
         unsafe {
             let ptr = self.storage.as_mut_ptr().cast::<u8>();
             (self.run)(ptr);
-            // Prevent double-run. Drop is still valid.
             self.run = noop_run;
+            self.drop = noop_drop; // closure is gone, don't touch that memory again
         }
 
         if let Some(fence) = self.fence {

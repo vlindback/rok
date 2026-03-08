@@ -1,8 +1,8 @@
 // local.rs
 
-use std::sync::Arc;
+use std::{mem::MaybeUninit, sync::Arc};
 
-use crossbeam::{deque::Worker, sync::Parker};
+use crossbeam::{deque::Worker, sync::Parker, utils::CachePadded};
 
 use crate::{
     job_pool::JobIndex,
@@ -12,21 +12,24 @@ use crate::{
     stop::StopToken,
 };
 
+const MAX_STEAL_BATCH: usize = 8; // todo: we can tune this.
+
 pub(crate) struct JobWorkerLocal {
     pub(crate) id: usize,
     pub(crate) stop_token: StopToken,
     pub(crate) scheduler: Arc<JobScheduler>,
-    pub(crate) shared: SendPtr<JobWorkerShared>,
+    pub(super) shared: SendPtr<CachePadded<JobWorkerShared>>,
     pub(crate) parker: Parker,
+    pub(crate) loot: [MaybeUninit<(JobIndex, JobPriority)>; MAX_STEAL_BATCH],
     deques: [Worker<JobIndex>; JobPriority::COUNT],
 }
 
 impl JobWorkerLocal {
-    pub(crate) fn new(
+    pub(super) fn new(
         id: usize,
         stop_token: StopToken,
         scheduler: Arc<JobScheduler>,
-        shared: SendPtr<JobWorkerShared>,
+        shared: SendPtr<CachePadded<JobWorkerShared>>,
         init: JobWorkerInit,
     ) -> Self {
         Self {
@@ -36,6 +39,7 @@ impl JobWorkerLocal {
             shared,
             deques: init.deques,
             parker: init.parker,
+            loot: unsafe { MaybeUninit::uninit().assume_init() },
         }
     }
 

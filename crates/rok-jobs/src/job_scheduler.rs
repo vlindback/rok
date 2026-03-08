@@ -1,5 +1,6 @@
 // job_scheduler.rs
 
+use std::mem::MaybeUninit;
 use std::num::{NonZeroU32, NonZeroUsize};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -7,6 +8,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use crossbeam::deque::{Stealer, Worker};
 use crossbeam::queue::ArrayQueue;
 use crossbeam::sync::Parker;
+use crossbeam::utils::CachePadded;
 
 use crate::job::Job;
 use crate::job_fence::JobFence;
@@ -21,9 +23,10 @@ use crate::tsc_timer::TscTimer;
 pub(crate) struct JobScheduler {
     stop_source: StopSource,
     pool: JobPool,
-    workers: Vec<JobWorkerShared>,
+    workers: Vec<CachePadded<JobWorkerShared>>,
     worker_handles: Vec<JobWorkerHandle>,
     rr_counter: AtomicUsize,
+    timer: TscTimer,
 }
 
 #[derive(Default)]
@@ -83,11 +86,11 @@ impl JobScheduler {
             let inboxes: [ArrayQueue<JobIndex>; JobPriority::COUNT] =
                 std::array::from_fn(|_| ArrayQueue::new(worker_inbox_cap));
 
-            shared_vec.push(JobWorkerShared {
+            shared_vec.push(CachePadded::new(JobWorkerShared {
                 stealers,
                 inboxes,
                 unparker,
-            });
+            }));
 
             worker_inits.push(JobWorkerInit { deques, parker });
         }
@@ -102,6 +105,7 @@ impl JobScheduler {
             workers: shared_vec,
             worker_handles: Vec::new(),
             rr_counter: AtomicUsize::new(0),
+            timer: TscTimer::calibrate(),
         });
 
         //
@@ -177,8 +181,65 @@ impl JobScheduler {
     }
 
     pub(crate) fn run_job(&self, index: JobIndex) {
+        //
         // Safety: index was produced by try_push and has not been executed yet.
-        unsafe { self.pool.execute_and_free(index) }
+        unsafe {
+            let job = self.pool.get_mut(index);
+
+            let record = job.record;
+            let nanos = if record.is_some() {
+                let (_, ns) = self.timer.measure(|| job.execute());
+                Some(ns)
+            } else {
+                job.execute();
+                None
+            };
+
+            self.pool.free(index);
+
+            if let Some((rec, ns)) = record.zip(nanos) {
+                (*rec).record(ns);
+            }
+        }
+    }
+
+    pub(crate) fn try_steal(
+        &self,
+        thief_id: usize,
+        loot: &mut [MaybeUninit<(JobIndex, JobPriority)>],
+    ) -> usize {
+        // NOTE:
+        //
+        //      The worker loop assumes that the loot filled here is done so in a priority order.
+        //      if that ever changes we might get priority bugs. Just an FYI for refactoring
+        //
+        let n_workers = self.workers.len();
+        let mut n_stolen: usize = 0;
+        let capacity = loot.len();
+        for prio in JobPriority::ALL {
+            for i in 1..n_workers {
+                // Start one past our own index, wrap around, stop before reaching ourselves.
+                let target = (thief_id + i) % n_workers;
+                while n_stolen < capacity {
+                    match self.workers[target].stealers[prio.index()].steal() {
+                        crossbeam::deque::Steal::Success(index) => {
+                            loot[n_stolen] = MaybeUninit::new((index, prio));
+                            n_stolen += 1;
+                        }
+                        crossbeam::deque::Steal::Retry => {
+                            // Lost a race. Better to move on to a less contested worker
+                            // than to spin here and burn CPU.
+                            break;
+                        }
+                        crossbeam::deque::Steal::Empty => break,
+                    }
+                }
+                if n_stolen == capacity {
+                    return n_stolen;
+                }
+            }
+        }
+        n_stolen
     }
 }
 
