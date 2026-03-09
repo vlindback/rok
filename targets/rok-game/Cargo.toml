@@ -1,0 +1,15 @@
+[package]
+name = "rok-game"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+
+[lib]
+# The filename the Engine will dlopen. Becomes:
+#   librok_game.so  (Linux)
+#   rok_game.dll    (Windows)
+name = "rok_game"
+crate-type = ["cdylib"]
+
+[dependencies]
+rok-abi.workspace = true
