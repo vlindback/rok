@@ -5,6 +5,7 @@ members = [
         "libs/rok-abi",
         "libs/rok-core",
         "libs/rok-jobs",
+        'libs/rok-log',
         "targets/rok-game",
 ]
 resolver = "2"
@@ -21,6 +22,7 @@ edition = "2024"
 rok-abi = { path = "libs/rok-abi" }
 rok-core = { path = "libs/rok-core" }
 rok-jobs = { path = "libs/rok-jobs" }
+rok-log = { path = "libs/rok-log" }
 # External
 crossbeam = "0.8"
 libloading = "0.8"

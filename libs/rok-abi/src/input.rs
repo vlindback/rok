@@ -114,7 +114,7 @@ pub struct RawInputEvent {
 
 #[repr(u32)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum DeviceKind {
+pub enum DeviceType {
     Keyboard = 0,
     Mouse = 1,
     Gamepad = 2,
@@ -126,7 +126,7 @@ pub enum DeviceKind {
 #[derive(Copy, Clone)]
 pub struct DeviceState {
     pub device_id: u64,
-    pub device_kind: DeviceKind,
+    pub device_kind: DeviceType,
     pub data: DeviceStateData,
 }
 
@@ -134,7 +134,7 @@ pub struct DeviceState {
 #[derive(Copy, Clone)]
 pub struct DeviceInfo {
     pub device_id: u64,
-    pub device_kind: DeviceKind,
+    pub device_type: DeviceType,
     pub data: DeviceStateData,
 }
 

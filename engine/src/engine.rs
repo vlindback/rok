@@ -23,11 +23,12 @@ use std::ffi::c_void;
 
 use rok_abi::engine_api::{EngineApi, EngineState, EngineVTable, FfiFence, FfiJobPriority};
 use rok_abi::frame::FrameInput;
-use rok_abi::host_api::{HostState, HostVTable, LogLevel};
 use rok_abi::input::DeviceInfo;
 use rok_abi::input::DeviceState;
+use rok_abi::log::LogLevel;
 use rok_abi::surface::NativeSurfaceHandle;
 use rok_abi::target_api::{HotReloadBuffer, TargetState, TargetVTable};
+use rok_abi::{HostState, HostVTable};
 
 use rok_jobs::{JobFence, JobPriority, JobSystem};
 

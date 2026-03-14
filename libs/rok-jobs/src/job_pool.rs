@@ -88,9 +88,4 @@ impl JobPool {
             index.0
         );
     }
-
-    /// Returns the maximum number of concurrent jobs this pool supports.
-    pub(crate) fn capacity(&self) -> usize {
-        self.slots.len()
-    }
 }

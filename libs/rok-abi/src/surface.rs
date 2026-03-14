@@ -12,7 +12,7 @@ use core::ffi::c_void;
 
 #[repr(u32)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum SurfaceKind {
+pub enum SurfaceType {
     Win32 = 0,
     Wayland = 1,
     Android = 2,
@@ -56,7 +56,7 @@ pub union SurfaceData {
 /// provide a fresh one via `EngineVTable::on_surface_changed`.
 #[repr(C)]
 pub struct NativeSurfaceHandle {
-    pub kind: SurfaceKind,
+    pub kind: SurfaceType,
     pub data: SurfaceData,
     /// Current drawable dimensions in physical pixels.
     pub width: u32,

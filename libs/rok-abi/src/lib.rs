@@ -30,6 +30,7 @@ pub mod engine_api;
 pub mod frame;
 pub mod host_api;
 pub mod input;
+pub mod log;
 pub mod surface;
 pub mod target_api;
 
@@ -39,9 +40,10 @@ pub use engine_api::{
     FfiJobPriority,
 };
 pub use frame::FrameInput;
-pub use host_api::{HostState, HostVTable, LogLevel};
+pub use host_api::{HostState, HostVTable};
 pub use input::{InputEventKind, RawInputEvent};
-pub use surface::{NativeSurfaceHandle, SurfaceKind};
+pub use log::LogLevel;
+pub use surface::{NativeSurfaceHandle, SurfaceType};
 pub use target_api::{
     HotReloadBuffer, TARGET_ENTRY_SYMBOL, TargetState, TargetVTable, TargetVTableGetter,
 };

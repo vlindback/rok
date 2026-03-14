@@ -1,4 +1,3 @@
-
 // game.rs
 //
 // Concrete game state and TargetVTable implementations.
@@ -7,7 +6,7 @@
 use std::ffi::c_char;
 
 use rok_abi::engine_api::EngineApi;
-use rok_abi::host_api::LogLevel;
+use rok_abi::log::LogLevel;
 use rok_abi::target_api::{HotReloadBuffer, TargetState, TargetVTable};
 
 // ---------------------------------------------------------------------------
@@ -19,7 +18,6 @@ struct GameState {
     api: *const EngineApi,
 
     frame_count: u64,
-
     // TODO: worlds, scene graph, asset handles, etc.
 }
 
@@ -50,11 +48,7 @@ fn save(state: &GameState, buf: *mut HotReloadBuffer) {
     unsafe {
         let buf = &mut *buf;
         assert!(buf.capacity >= SAVE_SIZE);
-        std::ptr::copy_nonoverlapping(
-            state.frame_count.to_le_bytes().as_ptr(),
-            buf.buf,
-            SAVE_SIZE,
-        );
+        std::ptr::copy_nonoverlapping(state.frame_count.to_le_bytes().as_ptr(), buf.buf, SAVE_SIZE);
         buf.len = SAVE_SIZE;
     }
 }
@@ -74,10 +68,14 @@ fn load(buf: *const HotReloadBuffer) -> u64 {
 // ---------------------------------------------------------------------------
 
 extern "C" fn on_init(
-    api:        *const EngineApi,
+    api: *const EngineApi,
     hot_reload: *const HotReloadBuffer,
 ) -> *mut TargetState {
-    let frame_count = if hot_reload.is_null() { 0 } else { load(hot_reload) };
+    let frame_count = if hot_reload.is_null() {
+        0
+    } else {
+        load(hot_reload)
+    };
 
     let state = Box::new(GameState { api, frame_count });
     let ptr = Box::into_raw(state) as *mut TargetState;
@@ -130,10 +128,10 @@ extern "C" fn on_resize(state: *mut TargetState, width: u32, height: u32) {
 
 pub fn make_vtable() -> TargetVTable {
     TargetVTable {
-        init:      on_init,
-        shutdown:  on_shutdown,
-        update:    on_update,
-        render:    Some(on_render),
+        init: on_init,
+        shutdown: on_shutdown,
+        update: on_update,
+        render: Some(on_render),
         on_resize: Some(on_resize),
     }
 }

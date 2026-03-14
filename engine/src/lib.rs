@@ -5,7 +5,7 @@
 
 mod engine;
 
-use rok_abi::{ENGINE_ENTRY_SYMBOL, EngineVTable};
+use rok_abi::EngineVTable;
 
 /// Called by the Host immediately after dlopen / LoadLibrary to obtain the
 /// complete Engine interface. The returned vtable contains only function

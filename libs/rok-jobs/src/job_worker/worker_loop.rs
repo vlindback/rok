@@ -1,7 +1,7 @@
 // job_loop.rs
 
 use crate::{
-    job, job_priority::JobPriority, job_worker::JobWorkerLocal, job_worker_tls::JobWorkerTLSGuard,
+    job_priority::JobPriority, job_worker::JobWorkerLocal, job_worker_tls::JobWorkerTLSGuard,
 };
 
 // Worker loop

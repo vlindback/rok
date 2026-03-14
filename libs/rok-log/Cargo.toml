@@ -1,0 +1,9 @@
+[package]
+name = "rok-log"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+
+[dependencies]
+rok-abi.workspace = true
+crossbeam.workspace = true

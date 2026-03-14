@@ -10,26 +10,15 @@
 // borrowed raw pointers. The Host must not free them before calling
 // Engine::shutdown.
 
-use core::ffi::{c_char, c_void};
+use core::ffi::c_char;
+
+use crate::LogLevel;
 
 /// Opaque host state pointer. The Engine passes this back into every HostVTable
 /// callback so the Host implementation can reach its own context without globals.
 #[repr(C)]
 pub struct HostState {
     _private: [u8; 0],
-}
-
-/// Log severity levels. Mirrors common conventions so host implementations
-/// can forward to spdlog, OutputDebugString, logcat, etc.
-#[repr(u32)]
-#[derive(Copy, Clone, Debug)]
-pub enum LogLevel {
-    Trace = 0,
-    Debug = 1,
-    Info = 2,
-    Warning = 3,
-    Error = 4,
-    Fatal = 5,
 }
 
 /// Callbacks from Engine → Host.
@@ -44,7 +33,7 @@ pub enum LogLevel {
 pub struct HostVTable {
     /// Emit a log message. `msg` is UTF-8, NOT null-terminated; use `len`.
     /// May be called from any thread.
-    pub log: extern "C" fn(host: *mut HostState, level: LogLevel, msg: *const c_char, len: usize),
+    pub log: extern "C" fn(*mut HostState, LogLevel, *const c_char, usize),
 
     /// Ask the Host to begin an orderly shutdown after the current frame.
     /// The Host will stop its event loop and call Engine::shutdown.

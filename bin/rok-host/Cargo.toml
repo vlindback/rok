@@ -1,8 +1,14 @@
 [package]
 name = "rok-host"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
 
 [dependencies]
 libloading.workspace = true
 rok-abi.workspace = true
+rok-log.workspace = true
+
+[[bin]]
+name = "rok-host"
+path = "src/main.rs"
