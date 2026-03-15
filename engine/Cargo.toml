@@ -10,3 +10,4 @@ crate-type = ["cdylib"]
 rok-abi.workspace = true
 rok-core.workspace = true
 rok-jobs.workspace = true
+rok-log.workspace = true

@@ -13,3 +13,4 @@ crate-type = ["cdylib"]
 
 [dependencies]
 rok-abi.workspace = true
+rok-log.workspace = true

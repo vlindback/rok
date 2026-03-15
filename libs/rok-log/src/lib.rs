@@ -27,7 +27,7 @@ mod file_sink;
 mod stderr_sink;
 
 pub use file_sink::FileSink;
-pub use logger::{init, register_sink, shutdown};
+pub use logger::{init, init_remote, register_sink, shutdown};
 pub use sink::Sink;
 pub use stderr_sink::StderrSink;
 

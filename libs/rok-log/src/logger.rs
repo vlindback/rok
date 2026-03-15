@@ -41,6 +41,18 @@ const QUEUE_CAPACITY: usize = 1024;
 // Dropped record counter
 // ---------------------------------------------------------------------------
 
+/// Remote submit backend. Set in DLL contexts (engine, target) so that
+/// rok-log macros route to the host's queue rather than a dead local one.
+/// In the host exe this stays null — LOGGER is used instead.
+static REMOTE_SUBMIT: AtomicPtr<()> = AtomicPtr::new(ptr::null_mut());
+
+/// Called once per DLL, immediately after it is loaded, with the host's
+/// submit function. After this call all rok-log macros in the DLL route
+/// to the host's logger thread.
+pub fn init_remote(submit: extern "C" fn(*const LogRecord)) {
+    REMOTE_SUBMIT.store(submit as *mut (), Ordering::Release);
+}
+
 /// Incremented when a push fails because the queue is full.
 /// The logger thread periodically checks and emits a warning.
 static DROPPED_RECORDS: AtomicU64 = AtomicU64::new(0);
@@ -167,20 +179,24 @@ pub fn log_record(record: LogRecord) {
     let ptr = LOGGER.load(Ordering::Acquire);
 
     if ptr.is_null() {
-        // Pre-init path. Caller must handle the ring buffer separately via
-        // the PRE_INIT_BUFFER in lib.rs.
-        write_stderr(&record);
+        // DLL path: if a remote submit has been wired in, use it.
+        let remote = REMOTE_SUBMIT.load(Ordering::Acquire);
+        if !remote.is_null() {
+            let f: extern "C" fn(*const LogRecord) = unsafe { std::mem::transmute(remote) };
+            f(&record);
+        } else {
+            // Pre-init or uninitialized DLL, fall back to stderr.
+            write_stderr(&record);
+        }
         return;
     }
 
-    // SAFETY: same as register_sink above.
+    // Host path: push into the queue.
     let inner = unsafe { &*ptr };
-
     if inner.queue.push(record).is_err() {
         DROPPED_RECORDS.fetch_add(1, Ordering::Relaxed);
         return;
     }
-
     inner.unparker.unpark();
 }
 

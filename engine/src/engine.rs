@@ -18,19 +18,20 @@
 //                               Created in load_target, dropped after
 //                               target.shutdown() returns in unload_target.
 
-use std::ffi::c_char;
 use std::ffi::c_void;
 
-use rok_abi::engine_api::{EngineApi, EngineState, EngineVTable, FfiFence, FfiJobPriority};
+use rok_abi::engine_api::{EngineApi, EngineState, EngineVTable, Fence, FfiJobPriority};
 use rok_abi::frame::FrameInput;
 use rok_abi::input::DeviceInfo;
 use rok_abi::input::DeviceState;
-use rok_abi::log::LogLevel;
 use rok_abi::surface::NativeSurfaceHandle;
 use rok_abi::target_api::{HotReloadBuffer, TargetState, TargetVTable};
 use rok_abi::{HostState, HostVTable};
 
 use rok_jobs::{JobFence, JobPriority, JobSystem};
+use rok_log::log_error;
+use rok_log::log_info;
+use rok_log::log_warn;
 
 // ---------------------------------------------------------------------------
 // Concrete state
@@ -59,20 +60,28 @@ struct ConcreteEngineState {
     engine_api: Option<Box<EngineApi>>,
 }
 
-impl ConcreteEngineState {
-    /// Forward a message to the Host's logger.
-    fn log(&self, level: LogLevel, msg: &str) {
-        // Safety: host_vtable is valid for the engine's lifetime (Host contract).
-        unsafe {
-            ((*self.host_vtable).log)(
-                self.host_state,
-                level,
-                msg.as_ptr() as *const c_char,
-                msg.len(),
-            );
-        }
-    }
-}
+// extern "C" fn host_log(
+//     _host: *mut rok_abi::HostState,
+//     level: LogLevel,
+//     msg: *const c_char,
+//     len: usize,
+// ) {
+//     // Safety: Engine guarantees msg is valid UTF-8 for `len` bytes.
+//     let text = unsafe {
+//         let slice = std::slice::from_raw_parts(msg as *const u8, len);
+//         std::str::from_utf8_unchecked(slice)
+//     };
+//     let record = make_record(
+//         timestamp_ns(),
+//         level,
+//         b"<engine>\0".as_ptr() as *const c_char,
+//         0,
+//         text.as_bytes(),
+//     );
+//     log_record(record);
+// }
+
+impl ConcreteEngineState {}
 
 // Safety: ConcreteEngineState is only ever accessed from the host thread
 // (the single thread that owns the EngineState pointer). The JobSystem
@@ -100,7 +109,10 @@ extern "C" fn engine_init(
     host_vtable: *const HostVTable,
     surface: *const NativeSurfaceHandle,
 ) -> *mut EngineState {
-    // surface is borrowed for this call only — read dimensions and forget.
+    // set up logging first
+
+    rok_log::init_remote(unsafe { (*host_vtable).log_submit });
+
     let (w, h) = unsafe { ((*surface).width, (*surface).height) };
 
     let state = Box::new(ConcreteEngineState {
@@ -118,7 +130,7 @@ extern "C" fn engine_init(
 
     // Log through the host now that we have a stable pointer.
     // Safety: ptr was just created and is valid.
-    unsafe { as_engine(ptr) }.log(LogLevel::Info, "rok-engine: init");
+    log_info!("rok-engine: init");
 
     ptr
 }
@@ -126,7 +138,7 @@ extern "C" fn engine_init(
 extern "C" fn engine_shutdown(state: *mut EngineState) {
     // Safety: state was produced by engine_init and this is the last call on it.
     let engine = unsafe { Box::from_raw(state as *mut ConcreteEngineState) };
-    engine.log(LogLevel::Info, "rok-engine: shutdown");
+    log_info!("rok-engine: shutdown");
     // Drop order: engine_api then job_system then rest — Rust handles this
     // correctly via field declaration order in ConcreteEngineState.
     drop(engine);
@@ -196,11 +208,7 @@ extern "C" fn engine_on_surface_changed(
     engine.surface_width = w;
     engine.surface_height = h;
 
-    engine.log(
-        LogLevel::Info,
-        "rok-engine: surface changed — swapchain recreation TODO",
-    );
-
+    log_info!("rok-engine: surface changed — swapchain recreation TODO");
     // TODO: recreate Vulkan swapchain here.
 }
 
@@ -208,10 +216,7 @@ extern "C" fn engine_load_target(state: *mut EngineState, vtable: *const TargetV
     let engine = unsafe { as_engine(state) };
 
     if engine.target_state != std::ptr::null_mut() {
-        engine.log(
-            LogLevel::Warning,
-            "rok-engine: load_target called while a target is already loaded — unload first",
-        );
+        log_warn!("rok-engine: load_target called while a target is already loaded. Unload first");
         return 0;
     }
 
@@ -228,7 +233,7 @@ extern "C" fn engine_load_target(state: *mut EngineState, vtable: *const TargetV
     let target_state = (vtable_copy.init)(api_ptr, std::ptr::null());
 
     if target_state.is_null() {
-        engine.log(LogLevel::Error, "rok-engine: target init returned null");
+        log_error!("rok-engine: target init returned null");
         engine.engine_api = None;
         return 0;
     }
@@ -236,8 +241,9 @@ extern "C" fn engine_load_target(state: *mut EngineState, vtable: *const TargetV
     engine.target_vtable = Some(vtable_copy);
     engine.target_state = target_state;
 
-    engine.log(LogLevel::Info, "rok-engine: target loaded");
-    1
+    log_info!("rok-engine: target loaded");
+
+    return 1;
 }
 
 extern "C" fn engine_unload_target(state: *mut EngineState) {
@@ -246,10 +252,7 @@ extern "C" fn engine_unload_target(state: *mut EngineState) {
     let (vtable, target_state) = match engine.target_vtable.take() {
         Some(v) => (v, engine.target_state),
         None => {
-            engine.log(
-                LogLevel::Warning,
-                "rok-engine: unload_target called with no target loaded",
-            );
+            log_warn!("rok-engine: unload_target called with no target loaded");
             return;
         }
     };
@@ -267,39 +270,20 @@ extern "C" fn engine_unload_target(state: *mut EngineState) {
     // EngineApi is safe to drop now that target.shutdown has returned.
     engine.engine_api = None;
 
-    engine.log(LogLevel::Info, "rok-engine: target unloaded");
+    log_info!("rok-engine: target unloaded");
 }
 
 // ---------------------------------------------------------------------------
 // EngineApi implementations (Engine → Target callbacks)
 // ---------------------------------------------------------------------------
 
-extern "C" fn api_log(engine: *mut EngineState, level: u32, msg: *const c_char, len: usize) {
-    // Re-use engine's own log path so it reaches the host.
-    let engine = unsafe { as_engine(engine) };
-    let text = unsafe {
-        let slice = std::slice::from_raw_parts(msg as *const u8, len);
-        std::str::from_utf8_unchecked(slice)
-    };
-    // Convert u32 back to LogLevel; clamp unknown values to Error.
-    let level = match level {
-        0 => LogLevel::Trace,
-        1 => LogLevel::Debug,
-        2 => LogLevel::Info,
-        3 => LogLevel::Warning,
-        4 => LogLevel::Error,
-        _ => LogLevel::Fatal,
-    };
-    engine.log(level, text);
-}
-
-extern "C" fn api_fence_create(_engine: *mut EngineState) -> *mut FfiFence {
+extern "C" fn api_fence_create(_engine: *mut EngineState) -> *mut Fence {
     // Allocate a real JobFence on the heap and type-erase the pointer.
     let fence = Box::new(JobFence::new());
-    Box::into_raw(fence) as *mut FfiFence
+    Box::into_raw(fence) as *mut Fence
 }
 
-extern "C" fn api_fence_free(_engine: *mut EngineState, fence: *mut FfiFence) {
+extern "C" fn api_fence_free(_engine: *mut EngineState, fence: *mut Fence) {
     // Safety: fence was produced by api_fence_create and has not been freed yet.
     // The Target must guarantee no jobs still reference this fence.
     unsafe { drop(Box::from_raw(fence as *mut JobFence)) };
@@ -308,7 +292,7 @@ extern "C" fn api_fence_free(_engine: *mut EngineState, fence: *mut FfiFence) {
 extern "C" fn api_schedule(
     engine: *mut EngineState,
     priority: FfiJobPriority,
-    fence: *mut FfiFence, // may be null
+    fence: *mut Fence, // may be null
     userdata: *mut c_void,
     f: extern "C" fn(*mut c_void),
 ) {
@@ -367,13 +351,13 @@ extern "C" fn api_schedule(
     }
 }
 
-extern "C" fn api_fence_wait(_engine: *mut EngineState, fence: *mut FfiFence) {
+extern "C" fn api_fence_wait(_engine: *mut EngineState, fence: *mut Fence) {
     // Safety: fence is a valid *mut JobFence, valid until the caller frees it.
     let job_fence = unsafe { &*(fence as *const JobFence) };
     job_fence.wait();
 }
 
-extern "C" fn api_fence_is_complete(_engine: *mut EngineState, fence: *mut FfiFence) -> u8 {
+extern "C" fn api_fence_is_complete(_engine: *mut EngineState, fence: *mut Fence) -> u8 {
     let job_fence = unsafe { &*(fence as *const JobFence) };
     job_fence.is_complete() as u8
 }
@@ -394,32 +378,24 @@ extern "C" fn api_input_get_device_state(
     todo!();
 }
 
-extern "C" fn api_input_device_just_connected(engine: *mut EngineState, device_id: u64) -> u8 {
-    todo!();
-}
-
-extern "C" fn api_input_device_just_disconnected(engine: *mut EngineState, device_id: u64) -> u8 {
-    todo!();
-}
-
 // ---------------------------------------------------------------------------
 // EngineApi constructor
 // ---------------------------------------------------------------------------
 
 fn make_engine_api(engine: *mut EngineState) -> EngineApi {
-    EngineApi {
+    let fn_log_submit = unsafe { (*(*as_engine(engine)).host_vtable).log_submit };
+
+    EngineApi::new(
         engine,
-        log: api_log,
-        fence_create: api_fence_create,
-        fence_free: api_fence_free,
-        schedule: api_schedule,
-        fence_wait: api_fence_wait,
-        fence_is_complete: api_fence_is_complete,
-        input_get_devices: api_input_get_devices,
-        input_get_device_state: api_input_get_device_state,
-        input_device_just_connected: api_input_device_just_connected,
-        input_device_just_disconnected: api_input_device_just_disconnected,
-    }
+        fn_log_submit,
+        api_fence_create,
+        api_fence_free,
+        api_schedule,
+        api_fence_wait,
+        api_fence_is_complete,
+        api_input_get_devices,
+        api_input_get_device_state,
+    )
 }
 
 // ---------------------------------------------------------------------------

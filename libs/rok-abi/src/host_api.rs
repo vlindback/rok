@@ -12,7 +12,7 @@
 
 use core::ffi::c_char;
 
-use crate::LogLevel;
+use crate::{LogLevel, log::LogRecord};
 
 /// Opaque host state pointer. The Engine passes this back into every HostVTable
 /// callback so the Host implementation can reach its own context without globals.
@@ -31,9 +31,8 @@ pub struct HostState {
 /// any pointer marked `// OPTIONAL`.
 #[repr(C)]
 pub struct HostVTable {
-    /// Emit a log message. `msg` is UTF-8, NOT null-terminated; use `len`.
-    /// May be called from any thread.
-    pub log: extern "C" fn(*mut HostState, LogLevel, *const c_char, usize),
+    /// Submit a log record to the host.
+    pub log_submit: extern "C" fn(*const LogRecord),
 
     /// Ask the Host to begin an orderly shutdown after the current frame.
     /// The Host will stop its event loop and call Engine::shutdown.

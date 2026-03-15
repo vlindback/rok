@@ -36,7 +36,7 @@ pub mod target_api;
 
 // Flatten the most-used types so callers can `use rok_abi::*`.
 pub use engine_api::{
-    ENGINE_ENTRY_SYMBOL, EngineApi, EngineState, EngineVTable, EngineVTableGetter, FfiFence,
+    ENGINE_ENTRY_SYMBOL, EngineApi, EngineState, EngineVTable, EngineVTableGetter, Fence,
     FfiJobPriority,
 };
 pub use frame::FrameInput;

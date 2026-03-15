@@ -11,6 +11,7 @@
 mod engine;
 mod host;
 mod host_api;
+mod host_config;
 mod host_error;
 mod host_state;
 
@@ -22,7 +23,7 @@ use rok_abi::{
 
 use rok_log::{StderrSink, log_fatal};
 
-use crate::host::Host;
+use crate::{host::Host, host_config::HostConfig};
 
 // ---------------------------------------------------------------------------
 // Main Setup Methods
@@ -55,26 +56,15 @@ fn init_logging() {
 // Main
 // ---------------------------------------------------------------------------
 
-// Paths (in a real build these come from argv or a config file)
-#[cfg(target_os = "linux")]
-const ENGINE_PATH: &str = "./rok_engine.so";
-#[cfg(target_os = "windows")]
-const ENGINE_PATH: &str = "./rok_engine.dll";
-#[cfg(not(any(target_os = "linux", target_os = "windows")))]
-const ENGINE_PATH: &str = "./rok_engine.dylib";
-
-#[cfg(target_os = "linux")]
-const TARGET_PATH: &str = "./rok_target.so";
-#[cfg(target_os = "windows")]
-const TARGET_PATH: &str = "./rok_target.dll";
-#[cfg(not(any(target_os = "linux", target_os = "windows")))]
-const TARGET_PATH: &str = "./rok_target.dylib";
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Set up the logging first.
     init_logging();
 
-    let host = Host::new(ENGINE_PATH, TARGET_PATH)?;
+    let config_name = std::env::args().nth(1).ok_or("Usage: rok-host <config>")?;
+
+    let config = HostConfig::load(&config_name)?;
+    let host = Host::new(&config.engine, &config.target)?;
+    host.main_loop();
 
     Ok(())
 }

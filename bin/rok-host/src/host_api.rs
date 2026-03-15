@@ -3,22 +3,16 @@
 // hosts implementation of the rok-abi HostVtable
 
 use crate::host_state::HostState;
-use rok_abi::{HostVTable, LogLevel};
+use rok_abi::HostVTable;
+use rok_abi::log::LogRecord;
 use std::ffi::c_char;
 
-extern "C" fn host_log(
-    _host: *mut rok_abi::HostState,
-    level: LogLevel,
-    msg: *const c_char,
-    len: usize,
-) {
-    // Safety: Engine guarantees msg is valid UTF-8 for `len` bytes.
-    let text = unsafe {
-        let slice = std::slice::from_raw_parts(msg as *const u8, len);
-        std::str::from_utf8_unchecked(slice)
-    };
-    // TODO: replace with a real logger (tracing, env_logger, etc.)
-    eprintln!("[{level:?}] {text}");
+use rok_log::logger::log_record;
+
+pub(crate) extern "C" fn host_log_submit(record: *const LogRecord) {
+    if !record.is_null() {
+        log_record(unsafe { *record });
+    }
 }
 
 extern "C" fn host_request_quit(host: *mut rok_abi::HostState) {
@@ -49,8 +43,8 @@ extern "C" fn host_read_file(
 }
 
 extern "C" fn host_file_size(_host: *mut rok_abi::HostState, path: *const c_char) -> usize {
-    let path = unsafe { std::ffi::CStr::from_ptr(path) };
-    let path = match path.to_str() {
+    let path_cstr = unsafe { std::ffi::CStr::from_ptr(path) };
+    let path = match path_cstr.to_str() {
         Ok(s) => s,
         Err(_) => return usize::MAX,
     };
@@ -63,7 +57,7 @@ extern "C" fn host_file_size(_host: *mut rok_abi::HostState, path: *const c_char
 
 pub(crate) fn create_host_vtable() -> HostVTable {
     HostVTable {
-        log: host_log,
+        log_submit: host_log_submit,
         request_quit: host_request_quit,
         read_file: Some(host_read_file),
         file_size: Some(host_file_size),

@@ -50,6 +50,7 @@ pub const LOG_MESSAGE_CAPACITY: usize = 512;
 /// declared `Send` because raw pointers are not `Send` by default, but
 /// this pointer is always valid for the lifetime of the process.
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct LogRecord {
     /// Monotonic nanosecond timestamp.
     pub timestamp_ns: u64,

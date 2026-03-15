@@ -3,11 +3,9 @@
 // Concrete game state and TargetVTable implementations.
 // This is where actual game code will live.
 
-use std::ffi::c_char;
-
 use rok_abi::engine_api::EngineApi;
-use rok_abi::log::LogLevel;
 use rok_abi::target_api::{HotReloadBuffer, TargetState, TargetVTable};
+use rok_log::log_info;
 
 // ---------------------------------------------------------------------------
 // State
@@ -21,19 +19,7 @@ struct GameState {
     // TODO: worlds, scene graph, asset handles, etc.
 }
 
-impl GameState {
-    fn log(&self, level: LogLevel, msg: &str) {
-        unsafe {
-            let api = &*self.api;
-            (api.log)(
-                api.engine,
-                level as u32,
-                msg.as_ptr() as *const c_char,
-                msg.len(),
-            );
-        }
-    }
-}
+impl GameState {}
 
 // ---------------------------------------------------------------------------
 // Hot-reload
@@ -71,6 +57,9 @@ extern "C" fn on_init(
     api: *const EngineApi,
     hot_reload: *const HotReloadBuffer,
 ) -> *mut TargetState {
+    // Enable logging.
+    unsafe { rok_log::init_remote((*api).log_submit()) };
+
     let frame_count = if hot_reload.is_null() {
         0
     } else {
@@ -80,11 +69,11 @@ extern "C" fn on_init(
     let state = Box::new(GameState { api, frame_count });
     let ptr = Box::into_raw(state) as *mut TargetState;
 
-    let s = unsafe { &*(ptr as *const GameState) };
+    let state = unsafe { &*(ptr as *const GameState) };
     if hot_reload.is_null() {
-        s.log(LogLevel::Info, "rok-game: init");
+        log_info!("rok-game: init");
     } else {
-        s.log(LogLevel::Info, "rok-game: hot-reload restore");
+        log_info!("rok-game: hot-reload restore");
     }
 
     ptr
@@ -94,9 +83,9 @@ extern "C" fn on_shutdown(state: *mut TargetState, hot_reload: *mut HotReloadBuf
     let boxed = unsafe { Box::from_raw(state as *mut GameState) };
 
     if hot_reload.is_null() {
-        boxed.log(LogLevel::Info, "rok-game: shutdown");
+        log_info!("rok-game: shutdown");
     } else {
-        boxed.log(LogLevel::Info, "rok-game: saving state for hot-reload");
+        log_info!("rok-game: saving state for hot-reload");
         save(&boxed, hot_reload);
     }
 }
@@ -117,7 +106,7 @@ extern "C" fn on_render(state: *mut TargetState) {
 extern "C" fn on_resize(state: *mut TargetState, width: u32, height: u32) {
     let state = unsafe { &*(state as *const GameState) };
     let msg = format!("rok-game: resize {width}x{height}");
-    state.log(LogLevel::Info, &msg);
+    log_info!("rok-game: resize {width}x{height}");
 
     // TODO: resize dependent render targets, update projection matrices
 }

@@ -13,26 +13,32 @@ use crate::host_api::create_host_vtable;
 pub(crate) struct Host {
     target: Option<Target>,
     state: HostState,
-    vtable: HostVTable,
+    _vtable: HostVTable,
     surface: NativeSurfaceHandle,
     engine: Engine,
 }
 
 impl Host {
-    pub(crate) fn new(engine_path: &str, target_path: &str) -> Result<Self, HostError> {
-        let state = HostState { should_quit: false };
-        let vtable = create_host_vtable();
+    pub(crate) fn new(engine_path: &str, target_path: &str) -> Result<Box<Self>, HostError> {
+        let mut state = HostState { should_quit: false };
+        let _vtable = create_host_vtable();
         let surface = create_platform_window();
-        let engine = Engine::load(engine_path)?;
+        let mut engine = Engine::load(engine_path)?;
+
+        let opaque_state: &mut rok_abi::HostState =
+            unsafe { &mut *(&mut state as *mut HostState as *mut rok_abi::HostState) };
+
+        engine.init(&_vtable, opaque_state, &surface)?;
+
         let target = engine.load_target(target_path)?;
 
-        Ok(Host {
+        Ok(Box::new(Host {
             target: Some(target),
             state,
-            vtable,
+            _vtable,
             surface,
             engine,
-        })
+        }))
     }
 
     pub(crate) fn main_loop(&self) {

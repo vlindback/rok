@@ -8,6 +8,7 @@ pub(crate) enum HostError {
     Io(std::io::Error),
     EngineInitFailure,
     TargetInitFailure,
+    ConfigMissingKey(&'static str),
 }
 
 impl From<std::io::Error> for HostError {
@@ -29,6 +30,7 @@ impl fmt::Display for HostError {
             HostError::Io(e) => write!(f, "I/O error: {}", e),
             HostError::EngineInitFailure => write!(f, "The engine failed to start."),
             HostError::TargetInitFailure => write!(f, "Could not find the target file."),
+            HostError::ConfigMissingKey(k) => write!(f, "Missing key in config: {}", k),
         }
     }
 }

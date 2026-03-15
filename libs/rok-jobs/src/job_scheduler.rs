@@ -2,8 +2,8 @@
 
 use std::mem::MaybeUninit;
 use std::num::{NonZeroU32, NonZeroUsize};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, OnceLock};
 
 use crossbeam::deque::{Stealer, Worker};
 use crossbeam::queue::ArrayQueue;
@@ -24,7 +24,7 @@ pub(crate) struct JobScheduler {
     stop_source: StopSource,
     pool: JobPool,
     workers: Vec<CachePadded<JobWorkerShared>>,
-    worker_handles: Vec<JobWorkerHandle>,
+    worker_handles: OnceLock<Vec<JobWorkerHandle>>,
     rr_counter: AtomicUsize,
     timer: TscTimer,
 }
@@ -103,7 +103,7 @@ impl JobScheduler {
             stop_source: StopSource::new(),
             pool: JobPool::with_capacity(pool_capacity),
             workers: shared_vec,
-            worker_handles: Vec::new(),
+            worker_handles: OnceLock::new(),
             rr_counter: AtomicUsize::new(0),
             timer: TscTimer::calibrate(),
         });
@@ -126,9 +126,7 @@ impl JobScheduler {
             })
             .collect();
 
-        Arc::get_mut(&mut scheduler)
-            .expect("no external Arc clones exist before workers are published")
-            .worker_handles = worker_handles;
+        scheduler.worker_handles.set(worker_handles).ok();
 
         scheduler
     }
@@ -246,8 +244,10 @@ impl JobScheduler {
 impl Drop for JobScheduler {
     fn drop(&mut self) {
         self.stop_source.request_stop();
-        for worker in self.worker_handles.drain(..) {
-            worker.join();
+        if let Some(handles) = self.worker_handles.get_mut() {
+            for worker in handles.drain(..) {
+                worker.join();
+            }
         }
     }
 }
