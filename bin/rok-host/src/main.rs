@@ -15,11 +15,7 @@ mod host_config;
 mod host_error;
 mod host_state;
 
-use rok_abi::{
-    ENGINE_ENTRY_SYMBOL, EngineState, EngineVTable, EngineVTableGetter, FrameInput, HostVTable,
-    LogLevel, NativeSurfaceHandle, RawInputEvent, TARGET_ENTRY_SYMBOL, TargetVTable,
-    TargetVTableGetter, frame::LifecycleFlags,
-};
+use rok_abi::LogLevel;
 
 use rok_log::{StderrSink, log_fatal};
 
@@ -46,8 +42,12 @@ fn init_logging() {
         log_fatal!("panic at {}: {}", location, message)
     }));
 
-    let initial_sinks: Vec<Box<dyn rok_log::Sink>> =
-        vec![Box::new(StderrSink::new(LogLevel::Warning))];
+    let initial_sinks: Vec<Box<dyn rok_log::Sink>> = vec![
+        #[cfg(debug_assertions)]
+        Box::new(StderrSink::new(LogLevel::Trace)),
+        #[cfg(not(debug_assertions))]
+        Box::new(StderrSink::new(LogLevel::Warning)),
+    ];
 
     rok_log::init(initial_sinks);
 }
@@ -60,10 +60,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Set up the logging first.
     init_logging();
 
+    let result = run();
+
+    result
+}
+
+fn run() -> Result<(), Box<dyn std::error::Error>> {
     let config_name = std::env::args().nth(1).ok_or("Usage: rok-host <config>")?;
 
-    let config = HostConfig::load(&config_name)?;
-    let host = Host::new(&config.engine, &config.target)?;
+    let config = HostConfig::load(&config_name).map_err(|e| {
+        log_fatal!("Failed to load config '{}': {}", config_name, e);
+        e
+    })?;
+
+    let mut host = Host::new(&config.engine, &config.target).map_err(|e| {
+        log_fatal!(
+            "Failed to start host: {} (engine: {}, target: {})",
+            e,
+            config.engine,
+            config.target
+        );
+        e
+    })?;
+
     host.main_loop();
 
     Ok(())

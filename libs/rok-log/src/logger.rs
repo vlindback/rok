@@ -23,7 +23,7 @@ use std::thread;
 use crossbeam::queue::ArrayQueue;
 use crossbeam::sync::{Parker, Unparker};
 
-use rok_abi::log::{LOG_MESSAGE_CAPACITY, LogRecord};
+use rok_abi::log::{LOG_FILE_CAPACITY, LOG_MESSAGE_CAPACITY, LogRecord};
 
 use crate::sink::Sink;
 use crate::stderr_sink::write_stderr;
@@ -70,22 +70,29 @@ static LOGGER: AtomicPtr<LoggerInner> = AtomicPtr::new(ptr::null_mut());
 pub fn make_record(
     timestamp_ns: u64,
     level: rok_abi::log::LogLevel,
-    file: *const std::ffi::c_char,
+    file: &str,
     line: u32,
     message: &[u8],
 ) -> LogRecord {
     let mut rec = LogRecord {
         timestamp_ns,
         level,
-        file,
         line,
+        file_len: 0,
+        file: [0u8; LOG_FILE_CAPACITY],
         message_len: 0,
         message: [0u8; LOG_MESSAGE_CAPACITY],
     };
 
-    let len = message.len().min(LOG_MESSAGE_CAPACITY);
-    rec.message[..len].copy_from_slice(&message[..len]);
-    rec.message_len = len as u16;
+    let file_bytes = file.as_bytes();
+    let file_len = file_bytes.len().min(LOG_FILE_CAPACITY);
+    rec.file[..file_len].copy_from_slice(&file_bytes[..file_len]);
+    rec.file_len = file_len as u16;
+
+    let msg_len = message.len().min(LOG_MESSAGE_CAPACITY);
+    rec.message[..msg_len].copy_from_slice(&message[..msg_len]);
+    rec.message_len = msg_len as u16;
+
     rec
 }
 

@@ -9,6 +9,7 @@ pub(crate) enum HostError {
     EngineInitFailure,
     TargetInitFailure,
     ConfigMissingKey(&'static str),
+    Window(rok_window::WindowError),
 }
 
 impl From<std::io::Error> for HostError {
@@ -23,6 +24,12 @@ impl From<libloading::Error> for HostError {
     }
 }
 
+impl From<rok_window::WindowError> for HostError {
+    fn from(err: rok_window::WindowError) -> Self {
+        HostError::Window(err)
+    }
+}
+
 impl fmt::Display for HostError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -31,6 +38,7 @@ impl fmt::Display for HostError {
             HostError::EngineInitFailure => write!(f, "The engine failed to start."),
             HostError::TargetInitFailure => write!(f, "Could not find the target file."),
             HostError::ConfigMissingKey(k) => write!(f, "Missing key in config: {}", k),
+            HostError::Window(e) => write!(f, "Window error: {}", e),
         }
     }
 }

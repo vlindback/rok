@@ -49,8 +49,7 @@ impl Sink for FileSink {
 
     fn write(&mut self, record: &LogRecord) {
         // SAFETY: file is always a valid null-terminated static string.
-        let file = unsafe { std::ffi::CStr::from_ptr(record.file) }
-            .to_str()
+        let file = std::str::from_utf8(&record.file[..record.file_len as usize])
             .unwrap_or("<invalid utf8>");
 
         let message = std::str::from_utf8(&record.message[..record.message_len as usize])

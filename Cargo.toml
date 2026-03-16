@@ -6,6 +6,7 @@ members = [
         "libs/rok-core",
         "libs/rok-jobs",
         'libs/rok-log',
+        "libs/rok-window",
         "targets/rok-game",
 ]
 resolver = "2"
@@ -23,9 +24,19 @@ rok-abi = { path = "libs/rok-abi" }
 rok-core = { path = "libs/rok-core" }
 rok-jobs = { path = "libs/rok-jobs" }
 rok-log = { path = "libs/rok-log" }
+rok-window = { path = "libs/rok-window" }
 # External
 crossbeam = "0.8"
 libloading = "0.8"
+# Platform
+windows-sys = { version = "0.59", features = [
+        "Win32_Foundation",
+        "Win32_UI_WindowsAndMessaging",
+        "Win32_UI_HiDpi",
+        "Win32_UI_Input",
+        "Win32_Graphics_Gdi",
+        "Win32_System_LibraryLoader",
+] }
 
 # --- Profiles ---
 [profile.dev.package."*"]

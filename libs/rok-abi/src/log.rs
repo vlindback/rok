@@ -40,6 +40,8 @@ pub enum LogLevel {
 /// of real log lines while keeping LogRecord stack-allocatable.
 pub const LOG_MESSAGE_CAPACITY: usize = 512;
 
+pub const LOG_FILE_CAPACITY: usize = 128;
+
 /// A single log record. Fixed size, no pointers into the heap.
 ///
 /// `file` points to a static string literal produced by the `file!()`
@@ -58,8 +60,9 @@ pub struct LogRecord {
     /// Severity level.
     pub level: LogLevel,
 
-    /// Source file. Null-terminated static string from `file!()`. Never null.
-    pub file: *const c_char,
+    // FIX: since LogRecords can live between DLL boundaries we can NOT use pointers.
+    pub file_len: u16,
+    pub file: [u8; LOG_FILE_CAPACITY], // copied bytes, no pointer
 
     /// Source line number from `line!()`.
     pub line: u32,

@@ -51,13 +51,13 @@ impl Engine {
             unsafe { libloading::Library::new(target_dll_path).map_err(HostError::Library)? };
         let getter: libloading::Symbol<TargetVTableGetter> =
             unsafe { _lib.get(TARGET_ENTRY_SYMBOL).map_err(HostError::Library)? };
-        let vtable = getter();
+        let _vtable = getter();
 
-        let ok = (self.vtable.load_target)(self.state, &vtable);
+        let ok = (self.vtable.load_target)(self.state, &_vtable);
         if ok == 0 {
             return Err(HostError::TargetInitFailure);
         }
-        Ok(Target { _lib, vtable })
+        Ok(Target { _lib, _vtable })
     }
 
     pub(crate) fn unload_target(&self) {
@@ -71,17 +71,14 @@ impl Engine {
     pub(crate) fn render(&self) {
         (self.vtable.render)(self.state)
     }
-
-    fn shutdown(&mut self) {
-        if !self.state.is_null() {
-            (self.vtable.shutdown)(self.state);
-            self.state = std::ptr::null_mut();
-        }
-    }
 }
 
 impl Drop for Engine {
     fn drop(&mut self) {
-        shutdown();
+        if !self.state.is_null() {
+            (self.vtable.shutdown)(self.state);
+            self.state = std::ptr::null_mut();
+        }
+        rok_log::shutdown();
     }
 }

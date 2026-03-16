@@ -52,12 +52,7 @@ pub fn timestamp_ns() -> u64 {
 // ---------------------------------------------------------------------------
 
 #[doc(hidden)]
-pub fn __submit(
-    level: rok_abi::log::LogLevel,
-    file: *const std::ffi::c_char,
-    line: u32,
-    args: std::fmt::Arguments,
-) {
+pub fn __submit(level: rok_abi::log::LogLevel, file: &str, line: u32, args: std::fmt::Arguments) {
     let mut buf = [0u8; LOG_MESSAGE_CAPACITY];
     let message_len = {
         let mut cursor = std::io::Cursor::new(&mut buf[..]);
@@ -80,7 +75,7 @@ macro_rules! log_trace {
     ($($arg:tt)*) => {
         $crate::__submit(
             rok_abi::log::LogLevel::Trace,
-            concat!(file!(), "\0").as_ptr() as *const std::ffi::c_char,
+            file!(),
             line!(),
             format_args!($($arg)*),
         )
@@ -92,7 +87,7 @@ macro_rules! log_debug {
     ($($arg:tt)*) => {
         $crate::__submit(
             rok_abi::log::LogLevel::Debug,
-            concat!(file!(), "\0").as_ptr() as *const std::ffi::c_char,
+            file!(),
             line!(),
             format_args!($($arg)*),
         )
@@ -104,7 +99,7 @@ macro_rules! log_info {
     ($($arg:tt)*) => {
         $crate::__submit(
             rok_abi::log::LogLevel::Info,
-            concat!(file!(), "\0").as_ptr() as *const std::ffi::c_char,
+            file!(),
             line!(),
             format_args!($($arg)*),
         )
@@ -116,7 +111,7 @@ macro_rules! log_warn {
     ($($arg:tt)*) => {
         $crate::__submit(
             rok_abi::log::LogLevel::Warning,
-            concat!(file!(), "\0").as_ptr() as *const std::ffi::c_char,
+            file!(),
             line!(),
             format_args!($($arg)*),
         )
@@ -128,7 +123,7 @@ macro_rules! log_error {
     ($($arg:tt)*) => {
         $crate::__submit(
             rok_abi::log::LogLevel::Error,
-            concat!(file!(), "\0").as_ptr() as *const std::ffi::c_char,
+            file!(),
             line!(),
             format_args!($($arg)*),
         )
@@ -140,7 +135,7 @@ macro_rules! log_fatal {
     ($($arg:tt)*) => {
         $crate::__submit(
             rok_abi::log::LogLevel::Fatal,
-            concat!(file!(), "\0").as_ptr() as *const std::ffi::c_char,
+            file!(),
             line!(),
             format_args!($($arg)*),
         )

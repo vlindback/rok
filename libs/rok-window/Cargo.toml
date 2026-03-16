@@ -1,15 +1,12 @@
 [package]
-name = "rok-host"
+name = "rok-window"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
 
 [dependencies]
-libloading.workspace = true
 rok-abi.workspace = true
 rok-log.workspace = true
-rok-window.workspace = true
 
-[[bin]]
-name = "rok-host"
-path = "src/main.rs"
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true

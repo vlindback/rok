@@ -60,27 +60,6 @@ struct ConcreteEngineState {
     engine_api: Option<Box<EngineApi>>,
 }
 
-// extern "C" fn host_log(
-//     _host: *mut rok_abi::HostState,
-//     level: LogLevel,
-//     msg: *const c_char,
-//     len: usize,
-// ) {
-//     // Safety: Engine guarantees msg is valid UTF-8 for `len` bytes.
-//     let text = unsafe {
-//         let slice = std::slice::from_raw_parts(msg as *const u8, len);
-//         std::str::from_utf8_unchecked(slice)
-//     };
-//     let record = make_record(
-//         timestamp_ns(),
-//         level,
-//         b"<engine>\0".as_ptr() as *const c_char,
-//         0,
-//         text.as_bytes(),
-//     );
-//     log_record(record);
-// }
-
 impl ConcreteEngineState {}
 
 // Safety: ConcreteEngineState is only ever accessed from the host thread

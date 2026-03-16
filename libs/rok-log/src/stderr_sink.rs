@@ -37,8 +37,8 @@ fn level_tag(level: LogLevel) -> &'static str {
     match level {
         LogLevel::Trace => "TRACE",
         LogLevel::Debug => "DEBUG",
-        LogLevel::Info => "INFO ",
-        LogLevel::Warning => "WARN ",
+        LogLevel::Info => "INFO",
+        LogLevel::Warning => "WARN",
         LogLevel::Error => "ERROR",
         LogLevel::Fatal => "FATAL",
     }
@@ -50,9 +50,8 @@ fn level_tag(level: LogLevel) -> &'static str {
 /// Format: `[LEVEL] file:line — message\n`
 pub fn write_stderr(record: &LogRecord) {
     // SAFETY: file is always a valid null-terminated static string.
-    let file = unsafe { std::ffi::CStr::from_ptr(record.file) }
-        .to_str()
-        .unwrap_or("<invalid utf8>");
+    let file =
+        std::str::from_utf8(&record.file[..record.file_len as usize]).unwrap_or("<invalid utf8>");
 
     let message = std::str::from_utf8(&record.message[..record.message_len as usize])
         .unwrap_or("<invalid utf8>");
@@ -63,13 +62,19 @@ pub fn write_stderr(record: &LogRecord) {
     let stderr = std::io::stderr();
     let mut handle = stderr.lock();
 
+    #[cfg(windows)]
+    const NEWLINE: &str = "\r\n";
+    #[cfg(not(windows))]
+    const NEWLINE: &str = "\n";
+
     // Ignore write errors — if stderr is broken there is nothing we can do.
     let _ = write!(
         handle,
-        "[{}] {}:{} — {}\n",
+        "[ {} ] {}:{} — {}{}",
         level_tag(record.level),
         file,
         record.line,
         message,
+        NEWLINE,
     );
 }
