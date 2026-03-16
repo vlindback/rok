@@ -1,7 +1,7 @@
 // host.rs
 
 use rok_abi::frame::LifecycleFlags;
-use rok_abi::{FrameInput, HostVTable, NativeSurfaceHandle, RawInputEvent};
+use rok_abi::{FrameInput, HostVTable};
 
 use crate::engine::engine::Engine;
 use crate::engine::target::Target;
@@ -85,41 +85,5 @@ impl Host {
 impl Drop for Host {
     fn drop(&mut self) {
         self.engine.unload_target();
-    }
-}
-
-/// Placeholder: drain the OS event queue into `events`.
-/// The real implementation calls PeekMessageW / wl_display_dispatch_pending
-/// and translates native events into RawInputEvents.
-fn poll_platform_events(_events: &mut Vec<RawInputEvent>) {
-    // TODO: Win32 PeekMessageW loop / Wayland dispatch
-
-    // Win32: match on WM_* messages
-    // WM_INPUT        → push to events
-    // WM_SIZE         → set lifecycle.surface_changed
-    // WM_CLOSE        → set lifecycle.should_quit
-    // WM_KILLFOCUS    → push FocusLost to events (affects input state)
-    //                   AND set lifecycle.focus_lost (engine may pause sim)
-}
-
-// ---------------------------------------------------------------------------
-// Platform stub (replace with rok-platform implementations)
-// ---------------------------------------------------------------------------
-
-/// Placeholder: in the real implementation this creates a Win32 / Wayland window
-/// and returns its native handles. For now it returns a zeroed handle so the
-/// rest of the host structure compiles and can be tested without a GPU.
-fn create_platform_window() -> NativeSurfaceHandle {
-    use rok_abi::surface::{SurfaceData, SurfaceType, Win32Surface};
-    NativeSurfaceHandle {
-        kind: SurfaceType::Win32,
-        data: SurfaceData {
-            win32: Win32Surface {
-                hwnd: std::ptr::null_mut(),
-                hinstance: std::ptr::null_mut(),
-            },
-        },
-        width: 1280,
-        height: 720,
     }
 }

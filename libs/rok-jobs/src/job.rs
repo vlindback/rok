@@ -1,6 +1,7 @@
 // job.rs
 
 use core::mem::{MaybeUninit, align_of, size_of};
+use std::any::Any;
 
 use crate::{job_fence::JobFence, job_record::JobRecord};
 
@@ -84,20 +85,22 @@ impl Job {
         job
     }
 
+    // execute() returns the payload if the job panicked
     #[inline]
-    pub fn execute(&mut self) {
-        unsafe {
-            let ptr = self.storage.as_mut_ptr().cast::<u8>();
-            (self.run)(ptr);
-            self.run = noop_run;
-            self.drop = noop_drop; // closure is gone, don't touch that memory again
-        }
+    pub fn execute(&mut self) -> Option<Box<dyn Any + Send>> {
+        let ptr = self.storage.as_mut_ptr().cast::<u8>();
+        let run = self.run;
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe { run(ptr) }));
+
+        self.run = noop_run;
+        self.drop = noop_drop;
 
         if let Some(fence) = self.fence {
-            unsafe {
-                (*fence).decrement();
-            }
+            unsafe { (*fence).decrement() };
         }
+
+        result.err()
     }
 }
 

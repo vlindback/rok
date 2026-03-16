@@ -75,6 +75,12 @@ impl JobSystem {
     {
         ParallelForBuilder::new(self, iter, f)
     }
+
+    /// Checks if there's an active panic in the JobSystem, if there is
+    /// it will resume_unwind.
+    pub fn check_panics(&self) {
+        self.scheduler.check_panics()
+    }
 }
 
 impl Default for JobSystem {

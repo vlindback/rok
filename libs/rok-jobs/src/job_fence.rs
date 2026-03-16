@@ -52,34 +52,38 @@ impl JobFence {
     }
 
     /// Block the calling thread until all associated jobs are complete.
-    ///
-    /// # Helping (TODO)
-    /// This currently parks the calling thread. The planned implementation
-    /// will use `get_job_worker_local_tls()` to check if we are on a worker
-    /// thread — if so, pop and execute local jobs while waiting; if not,
-    /// attempt to steal from other workers before parking. This turns the
-    /// wait into productive work rather than dead time.
-    ///
-    /// # Deadlock risk
-    /// Until helping is implemented, do not call this from a worker thread
-    /// if remaining jobs may be stuck behind a full inbox with no other
-    /// workers available to drain it.
+    /// This
     pub fn wait(&self) {
+        use crate::job_priority::JobPriority;
+        use crate::job_worker_tls::get_job_worker_local_tls;
+
         // Fast path: already done.
         if self.is_complete() {
             return;
+        }
+
+        // Help if we are a worker thread.
+        if let Some(worker) = get_job_worker_local_tls() {
+            while !self.is_complete() {
+                for prio in JobPriority::ALL {
+                    worker.drain_shared_inbox(prio);
+                }
+
+                if let Some(idx) = worker.pop_local() {
+                    worker.scheduler.run_job(idx);
+                } else {
+                    std::hint::spin_loop();
+                }
+            }
         }
 
         let guard = self.lock.lock().unwrap();
         let _guard = self.cv.wait_while(guard, |_| !self.is_complete()).unwrap();
     }
 
-    /// Block the calling thread by spinning until all associated jobs are complete.
-    ///
-    /// Prefer this on time-sensitive threads (e.g. the main thread near a frame
-    /// deadline) where the latency of a sleep/wakeup cycle is unacceptable.
-    ///
-    /// Spins hot - do not use this if jobs may take more than a few microseconds.
+    /// Blocks the calling thread by spinning until all associate djobs are complete.
+    /// Prefer on time-sensitive threads with a hard time deadline where latency
+    /// is a high priority.
     pub fn wait_spin(&self) {
         while !self.is_complete() {
             std::hint::spin_loop();

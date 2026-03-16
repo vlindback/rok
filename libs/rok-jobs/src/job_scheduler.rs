@@ -1,9 +1,11 @@
 // job_scheduler.rs
 
+use std::any::Any;
 use std::mem::MaybeUninit;
 use std::num::{NonZeroU32, NonZeroUsize};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::thread::ThreadId;
 
 use crossbeam::deque::{Stealer, Worker};
 use crossbeam::queue::ArrayQueue;
@@ -27,6 +29,8 @@ pub(crate) struct JobScheduler {
     worker_handles: OnceLock<Vec<JobWorkerHandle>>,
     rr_counter: AtomicUsize,
     timer: TscTimer,
+    panic_payload: Mutex<Option<Box<dyn Any + Send>>>,
+    owner_thread: ThreadId,
 }
 
 #[derive(Default)]
@@ -99,13 +103,15 @@ impl JobScheduler {
         // Pass 2: freeze shared slice inside Arc — addresses are now stable
         //
 
-        let mut scheduler = Arc::new(JobScheduler {
+        let scheduler = Arc::new(JobScheduler {
             stop_source: StopSource::new(),
             pool: JobPool::with_capacity(pool_capacity),
             workers: shared_vec,
             worker_handles: OnceLock::new(),
             rr_counter: AtomicUsize::new(0),
             timer: TscTimer::calibrate(),
+            panic_payload: Mutex::new(None),
+            owner_thread: std::thread::current().id(),
         });
 
         //
@@ -184,19 +190,25 @@ impl JobScheduler {
         unsafe {
             let job = self.pool.get_mut(index);
 
-            let record = job.record;
-            let nanos = if record.is_some() {
-                let (_, ns) = self.timer.measure(|| job.execute());
-                Some(ns)
-            } else {
-                job.execute();
-                None
-            };
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let record = job.record;
+                if record.is_some() {
+                    let (_, ns) = self.timer.measure(|| job.execute());
+                    if let Some(rec) = record {
+                        (*rec).record(ns);
+                    }
+                } else {
+                    job.execute();
+                }
+            }));
 
             self.pool.free(index);
 
-            if let Some((rec, ns)) = record.zip(nanos) {
-                (*rec).record(ns);
+            if let Err(payload) = result {
+                let mut guard = self.panic_payload.lock().unwrap();
+                if guard.is_none() {
+                    *guard = Some(payload); // store first panic, discard subsequent
+                }
             }
         }
     }
@@ -239,11 +251,29 @@ impl JobScheduler {
         }
         n_stolen
     }
+
+    pub fn check_panics(&self) {
+        debug_assert!(
+            std::thread::current().id() == self.owner_thread,
+            "check_panics() must be called from the thread that created the JobSystem"
+        );
+        let payload = self.panic_payload.lock().unwrap().take();
+        if let Some(payload) = payload {
+            std::panic::resume_unwind(payload);
+        }
+    }
 }
 
 impl Drop for JobScheduler {
     fn drop(&mut self) {
         self.stop_source.request_stop();
+
+        // Wake all workers so they see the stop flag immediately
+        // rather than waiting out their full park/yield cycle.
+        for worker in &self.workers {
+            worker.unparker.unpark();
+        }
+
         if let Some(handles) = self.worker_handles.get_mut() {
             for worker in handles.drain(..) {
                 worker.join();

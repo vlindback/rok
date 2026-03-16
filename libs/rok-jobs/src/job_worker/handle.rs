@@ -27,10 +27,13 @@ impl JobWorkerHandle {
         shared: *const CachePadded<JobWorkerShared>,
     ) -> Self {
         let shared = SendPtr(shared);
-        let join_handle = std::thread::spawn(move || {
-            let mut local = JobWorkerLocal::new(id, stop_token, scheduler, shared, init);
-            job_worker_loop(&mut local);
-        });
+        let join_handle = std::thread::Builder::new()
+            .name(format!("rok-worker-{}", id))
+            .spawn(move || {
+                let mut local = JobWorkerLocal::new(id, stop_token, scheduler, shared, init);
+                job_worker_loop(&mut local);
+            })
+            .expect("rok-jobs: failed to spawn worker thread");
 
         Self {
             join_handle: Some(join_handle),
