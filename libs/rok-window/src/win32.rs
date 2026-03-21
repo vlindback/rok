@@ -209,7 +209,7 @@ impl Window {
 
     pub fn surface_handle(&self) -> NativeSurfaceHandle {
         NativeSurfaceHandle {
-            kind: SurfaceType::Win32,
+            type_: SurfaceType::Win32,
             data: SurfaceData {
                 win32: Win32Surface {
                     hwnd: self.hwnd as *mut _,

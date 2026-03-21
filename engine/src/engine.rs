@@ -90,7 +90,7 @@ extern "C" fn engine_init(
 ) -> *mut EngineState {
     // set up logging first
 
-    rok_log::init_remote(unsafe { (*host_vtable).log_submit });
+    rok_log::init_remote(unsafe { (*host_vtable).fn_log_submit });
 
     let (w, h) = unsafe { ((*surface).width, (*surface).height) };
 
@@ -362,7 +362,7 @@ extern "C" fn api_input_get_device_state(
 // ---------------------------------------------------------------------------
 
 fn make_engine_api(engine: *mut EngineState) -> EngineApi {
-    let fn_log_submit = unsafe { (*(*as_engine(engine)).host_vtable).log_submit };
+    let fn_log_submit = unsafe { (*(*as_engine(engine)).host_vtable).fn_log_submit };
 
     EngineApi::new(
         engine,

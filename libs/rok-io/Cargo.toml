@@ -1,0 +1,12 @@
+[package]
+name = "rok-io"
+version.workspace = true # Inherits 0.1.0 from root
+authors.workspace = true # Inherits authors from root
+edition.workspace = true # Inherits 2024 from root
+
+[dependencies]
+# internal
+rok-abi.workspace = true
+#external
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true

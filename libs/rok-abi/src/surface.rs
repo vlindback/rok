@@ -56,7 +56,7 @@ pub union SurfaceData {
 /// provide a fresh one via `EngineVTable::on_surface_changed`.
 #[repr(C)]
 pub struct NativeSurfaceHandle {
-    pub kind: SurfaceType,
+    pub type_: SurfaceType,
     pub data: SurfaceData,
     /// Current drawable dimensions in physical pixels.
     pub width: u32,
