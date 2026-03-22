@@ -42,3 +42,24 @@ pub enum RingError {
     Mmap(i32),
     Submit(i32),
 }
+
+/// A platform-agnostic raw file handle.
+/// Obtain one from a `std::fs::File` via `RawHandle::from_file(&file)`.
+#[derive(Copy, Clone)]
+pub struct RawHandle(
+    #[cfg(target_os = "windows")] pub(crate) std::os::windows::io::RawHandle,
+    #[cfg(target_os = "linux")] pub(crate) std::os::unix::io::RawFd,
+);
+
+impl RawHandle {
+    pub fn from_file(file: &std::fs::File) -> Self {
+        #[cfg(target_os = "windows")]
+        {
+            Self(std::os::windows::io::AsRawHandle::as_raw_handle(file))
+        }
+        #[cfg(target_os = "linux")]
+        {
+            Self(std::os::unix::io::AsRawFd::as_raw_fd(file))
+        }
+    }
+}

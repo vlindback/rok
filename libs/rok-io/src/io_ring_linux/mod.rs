@@ -16,6 +16,13 @@ impl IoRingLinux {
         todo!("io_uring setup + mmap")
     }
 
+    pub fn register_file_handles(
+        &mut self,
+        _handles: &[crate::RawHandle],
+    ) -> Result<(), &'static str> {
+        todo!("io_uring_register IORING_REGISTER_FILES")
+    }
+
     pub fn submit_read(
         &mut self,
         _fd: i32,
