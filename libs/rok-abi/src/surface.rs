@@ -55,6 +55,7 @@ pub union SurfaceData {
 /// If it needs the handles again later (surface recreation), the Host will
 /// provide a fresh one via `EngineVTable::on_surface_changed`.
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct NativeSurfaceHandle {
     pub type_: SurfaceType,
     pub data: SurfaceData,

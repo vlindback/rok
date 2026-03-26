@@ -8,6 +8,7 @@ members = [
         "libs/rok-window",
         "libs/rok-io",
         "libs/rok-engine",
+        "libs/rok-renderer",
         "targets/rok-game",
 ]
 resolver = "2"
@@ -28,9 +29,11 @@ rok-log = { path = "libs/rok-log" }
 rok-window = { path = "libs/rok-window" }
 rok-io = { path = "libs/rok-io" }
 rok-engine = { path = "libs/rok-engine" }
+rok-renderer = { path = "libs/rok-renderer" }
 # External
 crossbeam = "0.8"
 libloading = "0.8"
+ash = "0.38.0"
 # Platform
 windows-sys = { version = "0.61.1", features = [
         "Win32_Foundation",

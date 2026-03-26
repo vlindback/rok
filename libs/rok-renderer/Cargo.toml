@@ -1,0 +1,12 @@
+# rok-renderer Cargo.toml
+
+[package]
+name = "rok-renderer"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+
+[dependencies]
+rok-abi.workspace = true
+rok-log.workspace = true
+ash.workspace = true
