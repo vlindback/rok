@@ -5,10 +5,10 @@ authors.workspace = true
 edition.workspace = true
 
 [dependencies]
-libloading.workspace = true
 rok-abi.workspace = true
 rok-log.workspace = true
 rok-window.workspace = true
+rok-engine.workspace = true
 
 [[bin]]
 name = "rok-host"

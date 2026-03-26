@@ -1,0 +1,13 @@
+[package]
+name = "rok-engine"
+version.workspace = true # Inherits 0.1.0 from root
+authors.workspace = true # Inherits authors from root
+edition.workspace = true # Inherits 2024 from root
+
+[dependencies]
+rok-abi.workspace = true
+rok-jobs.workspace = true
+rok-io.workspace = true
+rok-window.workspace = true
+# External
+libloading.workspace = true

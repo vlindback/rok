@@ -2,49 +2,17 @@
 
 use core::ffi::c_void;
 
-use crate::frame::FrameInput;
-use crate::host_api::{HostState, HostVTable};
 use crate::input::{DeviceInfo, DeviceState};
 use crate::log::LogRecord;
-use crate::surface::NativeSurfaceHandle;
-use crate::target_api::TargetVTable;
 
 // ---------------------------------------------------------------------------
 // Opaque engine state
 // ---------------------------------------------------------------------------
 
 #[repr(C)]
-pub struct EngineState {
+pub struct EngineHandle {
     _private: [u8; 0],
 }
-
-// ---------------------------------------------------------------------------
-// EngineVTable — Host → Engine
-// ---------------------------------------------------------------------------
-
-#[repr(C)]
-pub struct EngineVTable {
-    /// Initialise the Engine.
-    pub init: extern "C" fn(
-        host_state: *mut HostState,
-        host_vtable: *const HostVTable,
-        surface: *const NativeSurfaceHandle,
-    ) -> *mut EngineState,
-
-    pub shutdown: extern "C" fn(state: *mut EngineState),
-    pub update: extern "C" fn(state: *mut EngineState, input: *const FrameInput),
-    pub render: extern "C" fn(state: *mut EngineState),
-    pub on_surface_changed:
-        extern "C" fn(state: *mut EngineState, surface: *const NativeSurfaceHandle),
-    pub load_target: extern "C" fn(state: *mut EngineState, vtable: *const TargetVTable) -> u8,
-    pub unload_target: extern "C" fn(state: *mut EngineState),
-}
-
-/// Symbol name exported by the Engine DLL.
-pub const ENGINE_ENTRY_SYMBOL: &[u8] = b"rok_engine_vtable_get\0";
-
-/// Type of the Engine DLL's entry point.
-pub type EngineVTableGetter = extern "C" fn() -> EngineVTable;
 
 // ---------------------------------------------------------------------------
 // EngineApi — Engine → Target (services the Engine provides to the Target)
@@ -69,12 +37,12 @@ pub struct Fence {
 
 // Engine API fn Type Aliases
 
-type FnFenceCreate = extern "C" fn(engine: *mut EngineState) -> *mut Fence;
-type FnFenceFree = extern "C" fn(engine: *mut EngineState, fence: *mut Fence);
-type FnFenceWait = extern "C" fn(engine: *mut EngineState, fence: *mut Fence);
-type FnFenceIsComplete = extern "C" fn(engine: *mut EngineState, fence: *mut Fence) -> u8;
+type FnFenceCreate = extern "C" fn(engine: *mut EngineHandle) -> *mut Fence;
+type FnFenceFree = extern "C" fn(engine: *mut EngineHandle, fence: *mut Fence);
+type FnFenceWait = extern "C" fn(engine: *mut EngineHandle, fence: *mut Fence);
+type FnFenceIsComplete = extern "C" fn(engine: *mut EngineHandle, fence: *mut Fence) -> u8;
 type FnSchedule = extern "C" fn(
-    engine: *mut EngineState,
+    engine: *mut EngineHandle,
     priority: FfiJobPriority,
     fence: *mut Fence,
     userdata: *mut c_void,
@@ -82,10 +50,10 @@ type FnSchedule = extern "C" fn(
 );
 
 type FnGetInputDevices =
-    extern "C" fn(engine: *mut EngineState, buf: *mut DeviceInfo, buf_len: usize) -> usize;
+    extern "C" fn(engine: *mut EngineHandle, buf: *mut DeviceInfo, buf_len: usize) -> usize;
 
 type FnGetDeviceState =
-    extern "C" fn(engine: *mut EngineState, device_id: u64, state: *mut DeviceState) -> u8;
+    extern "C" fn(engine: *mut EngineHandle, device_id: u64, state: *mut DeviceState) -> u8;
 
 // Log is special due to DLL boundaries.
 
@@ -94,7 +62,7 @@ pub type FnLogSubmit = extern "C" fn(*const LogRecord);
 /// Engine services that the Target can call.
 #[repr(C)]
 pub struct EngineApi {
-    state: *mut EngineState,
+    handle: *mut EngineHandle,
     fn_log_submit: FnLogSubmit,
     fn_fence_create: FnFenceCreate,
     fn_fence_free: FnFenceFree,
@@ -109,7 +77,7 @@ impl EngineApi {
     // Construction
 
     pub fn new(
-        state: *mut EngineState,
+        handle: *mut EngineHandle,
         fn_log_submit: FnLogSubmit,
         fn_fence_create: FnFenceCreate,
         fn_fence_free: FnFenceFree,
@@ -120,7 +88,7 @@ impl EngineApi {
         fn_input_get_device_state: FnGetDeviceState,
     ) -> Self {
         Self {
-            state,
+            handle,
             fn_log_submit,
             fn_fence_create,
             fn_fence_free,
@@ -145,22 +113,22 @@ impl EngineApi {
 
     #[inline]
     pub fn fence_create(&self) -> *mut Fence {
-        (self.fn_fence_create)(self.state)
+        (self.fn_fence_create)(self.handle)
     }
 
     #[inline]
     pub fn fence_free(&self, fence: *mut Fence) {
-        (self.fn_fence_free)(self.state, fence)
+        (self.fn_fence_free)(self.handle, fence)
     }
 
     #[inline]
     pub fn fence_wait(&self, fence: *mut Fence) {
-        (self.fn_fence_wait)(self.state, fence)
+        (self.fn_fence_wait)(self.handle, fence)
     }
 
     #[inline]
     pub fn fence_is_complete(&self, fence: *mut Fence) -> bool {
-        (self.fn_fence_is_complete)(self.state, fence) == 1
+        (self.fn_fence_is_complete)(self.handle, fence) == 1
     }
 
     #[inline]
@@ -171,7 +139,7 @@ impl EngineApi {
         userdata: *mut c_void,
         f: extern "C" fn(*mut c_void),
     ) {
-        (self.fn_schedule)(self.state, priority, fence, userdata, f)
+        (self.fn_schedule)(self.handle, priority, fence, userdata, f)
     }
 
     // Input System
@@ -179,11 +147,11 @@ impl EngineApi {
     // TODO: Maybe this can take a vec or something output iterator?
     #[inline]
     pub fn input_get_devices(&self, buf: *mut DeviceInfo, buf_len: usize) -> usize {
-        (self.fn_input_get_devices)(self.state, buf, buf_len)
+        (self.fn_input_get_devices)(self.handle, buf, buf_len)
     }
 
     #[inline]
     pub fn input_get_device_state(&self, device_id: u64, state: *mut DeviceState) -> bool {
-        (self.fn_input_get_device_state)(self.state, device_id, state) == 1
+        (self.fn_input_get_device_state)(self.handle, device_id, state) == 1
     }
 }

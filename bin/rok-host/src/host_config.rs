@@ -8,7 +8,6 @@ use crate::host_error::HostError;
 
 pub(crate) struct HostConfig {
     // Required
-    pub engine: String,
     pub target: String,
     // I/O
     pub io_max_open_files: u32,
@@ -67,11 +66,6 @@ impl HostConfig {
 
         // Fetch required properties:
 
-        // Where is the engine.dll
-        let engine_path = map
-            .get("engine")
-            .ok_or(HostError::ConfigMissingKey("engine"))?;
-
         // Where is the target.dll
         let target_path = map
             .get("target")
@@ -84,7 +78,6 @@ impl HostConfig {
         //
 
         Ok(Self {
-            engine: make_dll_path(engine_path),
             target: make_dll_path(target_path),
             io_max_open_files,
         })

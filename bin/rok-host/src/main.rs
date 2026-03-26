@@ -8,16 +8,13 @@
 // It knows almost nothing about rendering or game logic — those live in the DLLs.
 // Its job is to pump the OS, collect raw input, and drive the engine tick.
 
-mod engine;
 mod host;
-mod host_api;
 mod host_config;
 mod host_error;
-mod host_state;
 
 use rok_abi::LogLevel;
 
-use rok_log::{StderrSink, log_fatal};
+use rok_log::{StderrSink, log_fatal, log_info};
 
 use crate::{host::Host, host_config::HostConfig};
 
@@ -57,33 +54,25 @@ fn init_logging() {
 // ---------------------------------------------------------------------------
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Set up the logging first.
     init_logging();
-
     let result = run();
-
     result
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let config_name = std::env::args().nth(1).ok_or("Usage: rok-host <config>")?;
-
     let config = HostConfig::load(&config_name).map_err(|e| {
         log_fatal!("Failed to load config '{}': {}", config_name, e);
         e
     })?;
 
-    let mut host = Host::new(&config.engine, &config.target).map_err(|e| {
-        log_fatal!(
-            "Failed to start host: {} (engine: {}, target: {})",
-            e,
-            config.engine,
-            config.target
-        );
+    log_info!("Starting host with target: {}", config.target);
+
+    let mut host = Host::new(config.target).map_err(|e| {
+        log_fatal!("Failed to start host: {}", e);
         e
     })?;
 
     host.main_loop();
-
     Ok(())
 }

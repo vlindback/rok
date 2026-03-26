@@ -1,13 +1,13 @@
 [workspace]
 members = [
         "bin/rok-host",
-        "engine",
         "libs/rok-abi",
         "libs/rok-core",
         "libs/rok-jobs",
         'libs/rok-log',
         "libs/rok-window",
         "libs/rok-io",
+        "libs/rok-engine",
         "targets/rok-game",
 ]
 resolver = "2"
@@ -27,6 +27,7 @@ rok-jobs = { path = "libs/rok-jobs" }
 rok-log = { path = "libs/rok-log" }
 rok-window = { path = "libs/rok-window" }
 rok-io = { path = "libs/rok-io" }
+rok-engine = { path = "libs/rok-engine" }
 # External
 crossbeam = "0.8"
 libloading = "0.8"

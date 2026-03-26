@@ -27,20 +27,13 @@
 //   Engine calls TargetVTable::render(target_state)      [optional]
 
 pub mod engine_api;
-pub mod frame;
-pub mod host_api;
 pub mod input;
 pub mod log;
 pub mod surface;
 pub mod target_api;
 
 // Flatten the most-used types so callers can `use rok_abi::*`.
-pub use engine_api::{
-    ENGINE_ENTRY_SYMBOL, EngineApi, EngineState, EngineVTable, EngineVTableGetter, Fence,
-    FfiJobPriority,
-};
-pub use frame::FrameInput;
-pub use host_api::{HostState, HostVTable};
+pub use engine_api::{EngineApi, Fence, FfiJobPriority};
 pub use input::{InputEventKind, RawInputEvent};
 pub use log::LogLevel;
 pub use surface::{NativeSurfaceHandle, SurfaceType};
