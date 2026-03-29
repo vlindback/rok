@@ -1,0 +1,9 @@
+# rok-math Cargo.toml
+
+[package]
+name = "rok-math"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+
+#[dependencies]

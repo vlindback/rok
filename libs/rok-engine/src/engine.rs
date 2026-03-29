@@ -27,6 +27,7 @@ impl Engine {
             app_name: "rok".into(),
             frames_in_flight: unsafe { NonZeroU32::new_unchecked(2) },
             surface: config.surface,
+            vsync: false, // TODO: load from config
         };
 
         let renderer = Renderer::new(&renderer_config).map_err(EngineError::Renderer)?;
@@ -38,9 +39,18 @@ impl Engine {
         })
     }
 
-    pub fn update(&self, frame_input: &FrameInput) {}
+    pub fn update(&mut self, frame_input: &FrameInput) {
+        if frame_input.lifecycle.surface_changed {
+            self.renderer.on_resize(
+                frame_input.lifecycle.surface_width,
+                frame_input.lifecycle.surface_height,
+            );
+        }
+    }
 
-    pub fn render(&self) {}
+    pub fn render(&mut self) {
+        self.renderer.render();
+    }
 
     pub fn should_quit(&self) -> bool {
         self.should_quit.load(std::sync::atomic::Ordering::Relaxed)

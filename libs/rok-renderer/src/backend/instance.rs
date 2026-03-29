@@ -160,6 +160,18 @@ impl VulkanInstance {
             _entry: entry,
         })
     }
+
+    // Getters
+
+    #[inline]
+    pub(crate) fn handle(&self) -> &Instance {
+        &self.instance
+    }
+
+    #[inline]
+    pub(crate) fn entry(&self) -> &Entry {
+        &self._entry
+    }
 }
 
 unsafe extern "system" fn debug_callback(
