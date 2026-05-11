@@ -1,4 +1,4 @@
-// vec2.rs
+// quaternion.rs
 //
 // rok-math library
 //

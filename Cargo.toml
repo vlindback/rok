@@ -9,6 +9,7 @@ members = [
         "libs/rok-io",
         "libs/rok-engine",
         "libs/rok-renderer",
+        "libs/rok-math",
         "targets/rok-game",
 ]
 resolver = "2"
@@ -30,6 +31,7 @@ rok-window = { path = "libs/rok-window" }
 rok-io = { path = "libs/rok-io" }
 rok-engine = { path = "libs/rok-engine" }
 rok-renderer = { path = "libs/rok-renderer" }
+rok-math = { path = "libs/rok-math" }
 # External
 crossbeam = "0.8"
 libloading = "0.8"

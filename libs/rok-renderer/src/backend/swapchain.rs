@@ -107,9 +107,9 @@ impl VulkanSwapchain {
             image_count,
         );
 
-        // --- Queue family sharing ---
-        // If graphics and present are different families, use CONCURRENT.
-        // Otherwise EXCLUSIVE (faster, no ownership transfer needed).
+        // Queue family sharing:
+        // - If graphics and present are different families, use CONCURRENT.
+        // - Otherwise EXCLUSIVE (faster, no ownership transfer needed).
         let graphics_family = queue_families.graphics;
         let present_family = queue_families.present;
         let concurrent_families = [graphics_family, present_family];
@@ -119,7 +119,7 @@ impl VulkanSwapchain {
             (vk::SharingMode::EXCLUSIVE, &[][..])
         };
 
-        // --- Create swapchain ---
+        // Create swapchain
         let create_info = vk::SwapchainCreateInfoKHR::default()
             .surface(surface)
             .min_image_count(image_count)
@@ -143,7 +143,7 @@ impl VulkanSwapchain {
             )?
         };
 
-        // --- Get images ---
+        // Get images
         let images = unsafe {
             check!(
                 device.swapchain_loader.get_swapchain_images(swapchain),
@@ -151,7 +151,7 @@ impl VulkanSwapchain {
             )?
         };
 
-        // --- Create image views ---
+        // Create image views
         let image_views = create_image_views(device.handle(), &images, format.format)?;
 
         Ok(Self {
