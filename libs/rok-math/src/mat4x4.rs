@@ -183,6 +183,30 @@ impl Mat4x4 {
         }
     }
 
+    pub fn t(self) {
+        let col = self.cols;
+        let cof_a = (col[2].z() * col[3].w()) - (col[3].z() * col[2].w());
+        let cof_b = (col[2].y() * col[3].w()) - (col[3].y() * col[2].w());
+        let cof_c = (col[2].y() * col[3].z()) - (col[3].y() * col[2].z());
+        let cof_d = (col[2].x() * col[3].w()) - (col[3].x() * col[2].w());
+        let cof_e = (col[2].x() * col[3].z()) - (col[3].x() * col[2].z());
+        let cof_f = (col[2].x() * col[3].y()) - (col[3].x() * col[2].y());
+        let cof_j = (col[2].x() * col[3].w()) - (col[2].w() * col[3].x());
+        let cof_k = (col[2].x() * col[3].z()) - (col[2].z() * col[3].x());
+        let cof_m = (col[1].z() * col[3].w()) - (col[1].w() * col[3].z());
+        let cof_n = (col[1].y() * col[3].w()) - (col[1].w() * col[3].y());
+        let cof_o = (col[1].y() * col[3].z()) - (col[1].z() * col[3].y());
+        let cof_p = (col[1].x() * col[3].w()) - (col[1].w() * col[3].x());
+        let cof_q = (col[1].x() * col[3].z()) - (col[1].z() * col[3].x());
+        let cof_r = (col[1].x() * col[3].y()) - (col[1].y() * col[3].x());
+        let cof_s = (col[1].z() * col[2].w()) - (col[1].w() * col[2].z());
+        let cof_t = (col[1].y() * col[2].w()) - (col[1].w() * col[2].y());
+        let cof_u = (col[1].y() * col[2].z()) - (col[1].z() * col[2].y());
+        let cof_v = (col[1].x() * col[2].w()) - (col[1].w() * col[2].x());
+        let cof_w = (col[1].x() * col[2].z()) - (col[1].z() * col[2].x());
+        let cof_x = (col[1].x() * col[2].y()) - (col[1].y() * col[2].x());
+    }
+
     pub fn inverse(self) -> Option<Self> {
         //
         // The inverse A⁻¹ is defined by: A * A⁻¹ = I

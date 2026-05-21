@@ -28,6 +28,7 @@ pub struct Job {
                     - size_of::<RunFn>()
                     - size_of::<DropFn>()
                     - size_of::<Option<*const JobFence>>()
+                    - size_of::<Option<*const JobRecord>>()
             },
         >,
     >,

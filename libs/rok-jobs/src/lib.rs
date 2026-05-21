@@ -14,7 +14,7 @@ mod job_worker_tls;
 mod join_handle;
 mod tsc_timer;
 
-// Public API surface — everything else is an implementation detail.
+// Public API surface - everything else is an implementation detail.
 pub use job_fence::JobFence;
 pub use job_priority::JobPriority;
 pub use job_system::JobSchedulerConfig;
