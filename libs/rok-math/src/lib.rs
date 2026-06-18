@@ -20,5 +20,3 @@ pub mod plane;
 // re-exports:
 
 pub use lerp::Lerp;
-
-mod mat4x4_tests;
