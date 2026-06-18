@@ -66,7 +66,7 @@ impl Vec2 {
     }
 
     #[inline]
-    pub fn dot_product(self, other: Vec2) -> f32 {
+    pub fn dot(self, other: Vec2) -> f32 {
         (self.x * other.x) + (self.y * other.y)
     }
 
