@@ -40,6 +40,7 @@ impl AddAssign for Vec3 {
 }
 
 impl AddAssign<&Vec3> for Vec3 {
+    #[inline]
     fn add_assign(&mut self, rhs: &Self) {
         self.x += rhs.x;
         self.y += rhs.y;
@@ -112,6 +113,18 @@ impl DivAssign<&Vec3> for Vec3 {
         self.x /= rhs.x;
         self.y /= rhs.y;
         self.z /= rhs.z;
+    }
+}
+
+impl Div<f32> for Vec3 {
+    type Output = Self;
+    #[inline]
+    fn div(self, scalar: f32) -> Self::Output {
+        Vec3 {
+            x: self.x / scalar,
+            y: self.y / scalar,
+            z: self.z / scalar,
+        }
     }
 }
 
@@ -210,6 +223,10 @@ impl From<Vec3> for [f32; 3] {
 // Implementation block
 
 impl Vec3 {
+    /// Below this squared length a vector is treated as zero during
+    /// normalization (length cutoff = sqrt = 1e-4).
+    const NORMALIZE_EPS: f32 = 1e-8;
+
     pub fn new(x: f32, y: f32, z: f32) -> Self {
         Self { x, y, z }
     }
@@ -281,12 +298,14 @@ impl Vec3 {
     }
 
     pub fn normalized(self) -> Self {
-        let length = self.length();
-        if length != 0. {
+        let len_sq = self.length_squared();
+        // Guard on len_sq, so the effective length cutoff is sqrt(1e-8) = 1e-4.
+        if len_sq > Self::NORMALIZE_EPS {
+            let inv_len = 1.0 / len_sq.sqrt();
             Self {
-                x: self.x / length,
-                y: self.y / length,
-                z: self.z / length,
+                x: self.x * inv_len,
+                y: self.y * inv_len,
+                z: self.z * inv_len,
             }
         } else {
             Self {
@@ -298,29 +317,38 @@ impl Vec3 {
     }
 
     #[inline]
-    pub fn length(&self) -> f32 {
-        (self.x * self.x + self.y * self.y + self.z * self.z).sqrt()
+    pub fn length(self) -> f32 {
+        self.length_squared().sqrt()
+    }
+
+    #[inline]
+    pub fn length_squared(self) -> f32 {
+        self.x * self.x + self.y * self.y + self.z * self.z
+    }
+
+    #[inline]
+    pub fn distance(self, other: Vec3) -> f32 {
+        (self - other).length()
+    }
+
+    #[inline]
+    pub fn distance_squared(self, other: Vec3) -> f32 {
+        (self - other).length_squared()
     }
 
     /// Normalizes the Vec3 producing a unit vector.
     pub fn normalize(&mut self) {
-        let length = self.length();
-        if length != 0. {
-            self.x /= length;
-            self.y /= length;
-            self.z /= length;
+        let len_sq = self.length_squared();
+        if len_sq > Self::NORMALIZE_EPS {
+            let inv_len = 1.0 / len_sq.sqrt();
+            self.x *= inv_len;
+            self.y *= inv_len;
+            self.z *= inv_len;
         } else {
             self.x = 0.;
             self.y = 0.;
             self.z = 0.;
         }
-    }
-
-    /// Returns a copy of this Vec3 as a unit vector (length 1)
-    pub fn as_unit(self) -> Self {
-        let mut copy = self;
-        copy.normalize();
-        copy
     }
 
     #[inline]
@@ -345,6 +373,81 @@ impl Vec3 {
             y: val,
             z: val,
         }
+    }
+
+    /// Reflects `self` across the plane with unit `normal`.
+    ///
+    /// self = parallel + perp, parallel = (self·n) n  (n assumed unit).
+    /// Reflection flips only the parallel part:
+    ///   r = self - 2 (self·n) n
+    ///
+    /// Precondition: `normal` is normalized. We deliberately do NOT normalize
+    /// here — that hides caller bugs and buries a sqrt in a hot path.
+    #[inline]
+    pub fn reflect(self, normal: Self) -> Self {
+        self - normal * (2.0 * self.dot(normal))
+    }
+
+    /// Vector projection of `self` onto `other`: the part of `self`
+    /// lying along `other`. Returns a vector parallel to `other`.
+    ///
+    ///   proj = (self·other / |other|²) other
+    ///
+    /// `other` need NOT be unit. Undefined if `other` is the zero vector.
+    #[inline]
+    pub fn project_onto(self, other: Self) -> Self {
+        debug_assert!(other.length_squared() > 0.0, "project_onto: zero vector");
+        other * (self.dot(other) / other.dot(other))
+    }
+
+    /// Same, but skips the divide when `other` is already unit length.
+    #[inline]
+    pub fn project_onto_normalized(self, other: Self) -> Self {
+        other * self.dot(other)
+    }
+
+    #[inline]
+    pub fn min(self, other: Self) -> Self {
+        Self::new(
+            self.x().min(other.x()),
+            self.y().min(other.y()),
+            self.z().min(other.z()),
+        )
+    }
+
+    #[inline]
+    pub fn max(self, other: Self) -> Self {
+        Self::new(
+            self.x().max(other.x()),
+            self.y().max(other.y()),
+            self.z().max(other.z()),
+        )
+    }
+
+    /// Per-component clamp into the box [min, max].
+    ///
+    /// Implemented as max(min).min(max). Note: NaN components of `self`
+    /// collapse to `min` here (min/max treat NaN as "missing"), which is a
+    /// useful sanitizing property. f32::clamp would instead PROPAGATE NaN.
+    #[inline]
+    pub fn clamp(self, min: Self, max: Self) -> Self {
+        debug_assert!(
+            min.x() <= max.x() && min.y() <= max.y() && min.z() <= max.z(),
+            "clamp: min must be <= max per component"
+        );
+        self.max(min).min(max)
+    }
+
+    /// True if ANY component is NaN (the vector is contaminated).
+    #[inline]
+    pub fn is_nan(self) -> bool {
+        self.x().is_nan() || self.y().is_nan() || self.z().is_nan()
+    }
+
+    /// True if ALL components are finite (no NaN, no ±inf).
+    #[inline]
+    pub fn is_finite(self) -> bool {
+        self.x().is_finite() && self.y().is_finite() && self.z().is_finite()
     }
 }
 
