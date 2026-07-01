@@ -86,6 +86,15 @@ impl F32x4 {
         unsafe { _mm_store_ps(dst.as_mut_ptr(), self.0) }
     }
 
+    /// Insert a scalar via `insertps`. `IMM` is the `_mm_insert_ps` encoding:
+    /// src-lane [7:6], dst-lane [5:4], zmask [3:0]. Scalar is placed in lane 0
+    /// (src `00`), so the dst nibble selects the target:
+    ///   0x00 -> lane 0, 0x10 -> lane 1, 0x20 -> lane 2, 0x30 -> lane 3.
+    #[inline(always)]
+    pub fn insert<const IMM: i32>(self, scalar: f32) -> Self {
+        Self(unsafe { _mm_insert_ps::<IMM>(self.0, _mm_set_ss(scalar)) })
+    }
+
     // Ahritmetic
 
     #[inline(always)]
