@@ -11,7 +11,7 @@ use crate::host_error::HostError;
 
 pub(crate) struct Host {
     event_loop: EventLoop,
-    engine: Engine,
+    engine: Box<Engine>,
 }
 
 impl Host {

@@ -5,67 +5,79 @@ on resume.
 
 ## Now
 
-**Resuming the math crate (`rok-math`).**
+**First Light — a single 3D cube rendering, then a camera around it.**
 
-The bare minimum surface for the renderer to lean on:
+`rok-math` is at a usable 1.0 (`Vec2`/`Vec3`/`Vec4`/`Mat4x4`/`Quaternion`,
+plus `Lerp` and the `F32x4` SIMD layer). The clear-color renderer works
+end to end (dynamic rendering, sync2, timeline-semaphore frame sync,
+resize/swapchain recreation). The next real milestone is getting actual
+geometry on screen.
 
-- `Vec2`, `Vec3`, `Vec4`, `Mat4x4`, `Quaternion`
+The immediate step: stand up a minimal graphics pipeline **built from a
+descriptor, not hardcoded**, and record a cube draw at the existing
+`// (Future: record draw commands here)` hook in `render_frame`. Pipeline
+state is data from day one — that's the thing worth getting right up front,
+because hardcoded pipeline logic is exactly what forces the rework we're
+avoiding. The cache behind it starts dumb (single slot / trivial map) and
+grows into a hashed cache only when usage or profiling asks for it.
 
-Decided against (or undecided) for this pass:
+Two independent tracks feed this milestone; neither blocks the other:
 
-- `Mat3x3` — probably not. Will decide if the renderer or transform code
-  ever actually wants it.
-- `Transform` class — undecided. Holding off until the shape is forced by
-  use, not designed in a vacuum.
-- `AABB`, `Plane`, `Frustum`, `Ray` — the current stub files will probably
-  be deleted for now and re-added when physics / culling / picking
-  actually need them. No point shaping these APIs before there's a
-  consumer.
+- **Renderer gains geometry:** pipeline-from-descriptor, shader modules,
+  vertex/index buffers (staging upload), depth image + attachment, MVP via
+  push constants, and a public renderer API that consumes a render-command
+  list instead of only `render()`.
+- **Integration gets wired:** the engine must actually call the target
+  vtable and build an `EngineApi` (see Next #5) — today the target loads
+  but never runs.
 
-Current state of math:
-- `F32x4` SIMD layer: done
-- `Vec4`: thin wrapper over F32x4, done
-- `Vec3`: mostly done (scalar, not SIMD-backed)
-- `Mat4x4`: done with tests for determinant, multiply, inverse, transpose
-- `Vec2`: empty
-- `Quaternion`: empty
+Open decision to make first: does the **engine** draw the cube internally
+(fastest path to pixels, no plugin boundary involved), or does the
+**target** submit it through `EngineApi`? Leaning engine-internal for
+first-light to decouple "get a cube on screen" from "wire the whole call
+chain," then move draw submission to the target once both halves work.
 
 ## Next
 
-In order:
+In rough order:
 
-1. **Math test suite** — after the basic math types exist, build a real
-   test suite for `Mat4x4` and `Quaternion` specifically. From prior
-   engine experience, matrix and quaternion bugs are either obscure or
-   miserable to track down. If any code in the engine deserves
-   defensive test coverage, it's this. The existing `Mat4x4` tests are a
-   start; quaternion needs the same treatment with worked numerical
-   examples verified against an external source (numpy / wolfram).
+1. **Render command list.** A flat `Vec<RenderCommand>` where
+   `RenderCommand` is a Rust enum (native tagged union — the direct
+   equivalent of the C++ enum+union, no manual tag, exhaustive match).
+   Keep variants `Copy`/POD, small, cache-friendly. Renderer drains the
+   list at the draw hook. This is the irreversible surface; get its shape
+   right, keep the implementation behind it minimal.
 
-2. **Renderer resume — first milestone: a moving 3D cube with a camera.**
-   The engine should be able to drive the renderer to display a single
-   3D cube and let a camera move and rotate around it. This is the
-   real first-light test of the engine→renderer integration, not the
-   clear-color we have now.
+2. **Pipeline from descriptor + trivial cache.** A `PipelineDesc` (vertex
+   layout, shader handles, render state, color/depth formats for dynamic
+   rendering) → pipeline. Start with one pipeline; the "cache" can be a
+   single slot. Lean on Vulkan dynamic state (viewport/scissor) to keep
+   distinct pipeline objects to a minimum. Hashed lookup + `VkPipelineCache`
+   disk serialization deferred until there's more than one pipeline to
+   justify them.
 
-3. **Input system wired into the engine.** Raw input is already
-   collected in rok-window and the ABI is defined. What's missing is
-   the engine-side device-state aggregation and the route into the
-   target via EngineApi. The cube-camera milestone above depends on
-   this — can't move a camera without input.
+3. **Buffer upload path + depth.** Staging-buffer upload for vertex/index
+   data; a depth image and depth attachment wired into the dynamic-
+   rendering info. Reverse-Z, `[0,1]` depth (already the locked
+   convention).
 
-4. **Basic asset system — shaders first.** Triggered by the renderer
-   needing real pipelines. Generational arenas, `Asset<T>` handles,
-   `AssetSystem` as a view onto host-owned memory. Scope is "load a
-   shader from disk, hand back a handle the renderer can use." Bigger
-   asset machinery deferred until more types need it.
+4. **Camera + MVP.** Add `rok-math` as a renderer/engine dependency (not
+   wired yet). Push-constant MVP first — simplest thing that moves the
+   cube. Descriptor-set UBO path can come later when there's more than one
+   object.
 
-5. **Dynamic pipelines / pipeline cache.** Static pipelines are not
-   acceptable long-term. Need to investigate how Vulkan pipeline caches
-   actually work in practice — never built one. Probably: hash the
-   pipeline state, look up in cache, miss → compile + insert. The
-   driver-side `VkPipelineCache` is a separate concern (serializing
-   compiled binaries to disk to skip recompilation across runs).
+5. **Wire the engine ↔ target call chain.** The engine currently stores
+   the target vtable as `_vtable` and never calls it, and never constructs
+   an `EngineApi`. Build the `EngineApi` instance (log submit, fences,
+   schedule, input queries), call `init`/`update`/`render`/`shutdown` at
+   the right points, and thread the borrowed `EngineApi` pointer through.
+   Until this exists the target is dormant.
+
+6. **Input into the engine.** `rok-host` already pumps raw events into a
+   `Vec`, but `FrameInput` has no events field so they're dropped. Add the
+   events channel to `FrameInput`, aggregate device state engine-side, and
+   expose it (the `EngineApi` input queries are already defined). The
+   camera can't move without this.
 
 ## Parked
 
@@ -88,6 +100,22 @@ waiting for the right moment.
 - **Audio system.** Personal background means this isn't a learning
   problem and can slot in "when there's time." Low priority — the engine
   works fine silent for now.
+
+- **Asset system (shaders first).** Triggered when the renderer needs
+  real pipelines loaded from disk. Generational arenas, `Asset<T>`
+  handles, `AssetSystem` as a view onto host-owned memory. For first-light
+  the cube's shaders can be embedded / loaded ad hoc; the real asset
+  machinery waits until more than one thing needs loading.
+
+## Loose ends (cheap cleanups, do opportunistically)
+
+- `rok-abi/src/lib.rs` header still describes the engine as a `cdylib` the
+  host `dlopen`s and mentions an `EngineVTable`. Engine is now an rlib
+  linked into the host; no `EngineVTable` exists. Update the comment.
+- Dead empty `rok-math` files: `aabb.rs`, `frustrum.rs`, `ray.rs` (not in
+  the module tree). Delete, and fix the `frustrum` → `frustum` spelling if
+  re-added.
+- `rok-engine/src/target.rs` opens with `// target.s`.
 
 ## Conventions for updating this file
 
