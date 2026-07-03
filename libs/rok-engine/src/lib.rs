@@ -5,4 +5,5 @@ pub mod error;
 pub mod frame;
 
 mod api;
+mod input;
 mod target;

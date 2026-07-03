@@ -1,5 +1,7 @@
 // frame.rs
 
+use rok_abi::RawInputEvent;
+
 pub struct LifecycleFlags {
     pub surface_width: u32,
     pub surface_height: u32,
@@ -9,7 +11,7 @@ pub struct LifecycleFlags {
 }
 
 /// Per-frame data bundle.
-pub struct FrameInput {
+pub struct FrameInput<'frame> {
     /// Seconds elapsed since the previous frame.
     pub delta_time: f32,
 
@@ -19,4 +21,8 @@ pub struct FrameInput {
 
     /// Lifetime flags (state changes)
     pub lifecycle: LifecycleFlags,
+
+    /// This frame's raw events, borrowed from the host's pump buffer.
+    /// Valid only for the duration of the frame.
+    pub events: &'frame [RawInputEvent],
 }

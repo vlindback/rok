@@ -54,6 +54,7 @@ impl Host {
                     surface_height: pump.new_height,
                     surface_valid: true,
                 },
+                events: &events,
             };
 
             self.engine.update(&frame_input);

@@ -4,8 +4,9 @@
 
 use std::{num::NonZeroU32, sync::atomic::AtomicBool};
 
-use crate::{api::build, error::EngineError, frame::FrameInput, target::Target};
-use rok_abi::{EngineApi, NativeSurfaceHandle, engine_api::EngineHandle};
+use crate::{api::build, error::EngineError, frame::FrameInput, input::InputState, target::Target};
+use rok_abi::{EngineApi, NativeSurfaceHandle, engine_api::EngineHandle, input::ScanCode};
+use rok_log::log_info;
 use rok_renderer::{Renderer, RendererConfig};
 
 pub struct EngineConfig {
@@ -17,6 +18,7 @@ pub struct Engine {
     api: Option<EngineApi>,
     target: Option<Target>,
     renderer: Renderer,
+    input_state: InputState,
     should_quit: AtomicBool,
 }
 
@@ -35,6 +37,7 @@ impl Engine {
             renderer,
             api: None,
             target: None,
+            input_state: InputState::new(),
             should_quit: AtomicBool::new(false),
         });
 
@@ -49,24 +52,29 @@ impl Engine {
         Ok(engine)
     }
 
-    pub fn update(&mut self, frame_input: &FrameInput) {
+    pub fn update(&mut self, input: &FrameInput) {
         // Handle resize updates.
-        if frame_input.lifecycle.surface_changed {
+        if input.lifecycle.surface_changed {
             self.renderer.on_resize(
-                frame_input.lifecycle.surface_width,
-                frame_input.lifecycle.surface_height,
+                input.lifecycle.surface_width,
+                input.lifecycle.surface_height,
             );
             if let Some(target) = self.target.as_mut() {
                 target.on_resize(
-                    frame_input.lifecycle.surface_width,
-                    frame_input.lifecycle.surface_height,
+                    input.lifecycle.surface_width,
+                    input.lifecycle.surface_height,
                 );
             }
         }
 
+        self.input_state.ingest(input.events);
+        if let Some(target) = self.target.as_mut() {
+            target.update(input.delta_time);
+        }
+
         // Run the targets update.
         if let Some(target) = self.target.as_mut() {
-            target.update(frame_input.delta_time);
+            target.update(input.delta_time);
         }
     }
 

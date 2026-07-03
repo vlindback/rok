@@ -146,6 +146,21 @@ pub union DeviceStateData {
     pub gamepad: GamepadState,
 }
 
+#[repr(u8)]
+#[derive(Copy, Clone)]
+pub enum ScanCode {
+    Escape = 0x01,
+    W = 0x11,
+    E = 0x12,
+    Q = 0x10,
+    A = 0x1E,
+    S = 0x1F,
+    D = 0x20,
+    LShift = 0x2A,
+    LCtrl = 0x1D,
+    Space = 0x39,
+}
+
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct KeyboardState {
@@ -158,7 +173,12 @@ pub struct KeyboardState {
 }
 
 impl KeyboardState {
-    pub fn is_down(&self, scan_code: u8) -> bool {
+    #[inline]
+    pub fn key_down(&self, code: ScanCode) -> bool {
+        self.is_down(code as u8)
+    }
+
+    fn is_down(&self, scan_code: u8) -> bool {
         self.keys_down[(scan_code / 8) as usize] & (1 << (scan_code % 8)) != 0
     }
 }
