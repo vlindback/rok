@@ -11,5 +11,6 @@ rok-io.workspace = true
 rok-window.workspace = true
 rok-renderer.workspace = true
 rok-log.workspace = true
+rok-math.workspace = true
 # External
 libloading.workspace = true
