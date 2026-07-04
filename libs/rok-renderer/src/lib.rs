@@ -20,6 +20,7 @@ use ash::vk;
 
 use backend::device::VulkanDevice;
 use backend::frame::FrameSync;
+use backend::image::DepthImage;
 use backend::instance::VulkanInstance;
 use backend::physical_device;
 use backend::surface::VulkanSurface;
@@ -27,6 +28,19 @@ use backend::swapchain::VulkanSwapchain;
 use error::{RendererError, RendererResult};
 use rok_abi::surface::{NativeSurfaceHandle, SurfaceType};
 use rok_log::{log_info, log_warn};
+
+use backend::pipeline::{GraphicsPipeline, PipelineDesc};
+
+use backend::buffer::{self, Buffer};
+use backend::vertex::Vertex;
+use rok_math::mat4x4::Mat4x4;
+use rok_math::vec3::Vec3;
+
+const QUAD_VERT_SPV: &[u8] = include_bytes!("../shaders/quad.vert.spv");
+const QUAD_FRAG_SPV: &[u8] = include_bytes!("../shaders/quad.frag.spv");
+
+const DEPTH_FORMAT: vk::Format = vk::Format::D32_SFLOAT; // universal for depth attachment; a
+// production path would query support
 
 // ---------------------------------------------------------------------------
 // RendererConfig
@@ -64,8 +78,16 @@ pub struct RendererConfig {
 /// Frame sync and swapchain must be destroyed before device;
 /// device before surface; surface before instance.
 pub struct Renderer {
+    // Device-bound resources
+    // Must be declared before the device.
     frame_sync: Option<FrameSync>,
     swapchain: Option<VulkanSwapchain>,
+    pipeline: Option<GraphicsPipeline>,
+    vertex_buffer: Option<Buffer>,
+    index_buffer: Option<Buffer>,
+    depth: Option<DepthImage>,
+
+    // Device
     device: VulkanDevice,
     physical_device: vk::PhysicalDevice,
     surface: Option<VulkanSurface>,
@@ -74,6 +96,7 @@ pub struct Renderer {
     vsync: bool,
     needs_resize: bool,
     current_extent: vk::Extent2D,
+    mem_props: vk::PhysicalDeviceMemoryProperties,
 }
 
 impl Renderer {
@@ -159,11 +182,128 @@ impl Renderer {
             None
         };
 
+        let mem_props = unsafe {
+            instance
+                .handle()
+                .get_physical_device_memory_properties(phys_device)
+        };
+
+        let depth = match &swapchain {
+            Some(sc) => Some(DepthImage::new(
+                device.handle(),
+                &mem_props,
+                sc.config.extent,
+                DEPTH_FORMAT,
+            )?),
+            None => None,
+        };
+
+        // Unit cube centered at origin; color from corner position.
+        let h = 0.5;
+        let vertices = [
+            Vertex {
+                position: Vec3::new(-h, -h, -h),
+                color: Vec3::new(0.0, 0.0, 0.0),
+            },
+            Vertex {
+                position: Vec3::new(h, -h, -h),
+                color: Vec3::new(1.0, 0.0, 0.0),
+            },
+            Vertex {
+                position: Vec3::new(h, h, -h),
+                color: Vec3::new(1.0, 1.0, 0.0),
+            },
+            Vertex {
+                position: Vec3::new(-h, h, -h),
+                color: Vec3::new(0.0, 1.0, 0.0),
+            },
+            Vertex {
+                position: Vec3::new(-h, -h, h),
+                color: Vec3::new(0.0, 0.0, 1.0),
+            },
+            Vertex {
+                position: Vec3::new(h, -h, h),
+                color: Vec3::new(1.0, 0.0, 1.0),
+            },
+            Vertex {
+                position: Vec3::new(h, h, h),
+                color: Vec3::new(1.0, 1.0, 1.0),
+            },
+            Vertex {
+                position: Vec3::new(-h, h, h),
+                color: Vec3::new(0.0, 1.0, 1.0),
+            },
+        ];
+        // Wound CCW-outward, so BACK culling will work when you flip it. With
+        // CULL_NONE now, winding is irrelevant — depth alone makes it solid.
+        let indices: [u16; 36] = [
+            4, 5, 6, 6, 7, 4, // +Z front
+            1, 0, 3, 3, 2, 1, // -Z back
+            5, 1, 2, 2, 6, 5, // +X right
+            0, 4, 7, 7, 3, 0, // -X left
+            3, 7, 6, 6, 2, 3, // +Y top
+            0, 1, 5, 5, 4, 0, // -Y bottom
+        ];
+
+        let (vertex_buffer, index_buffer) = match &swapchain {
+            Some(_) => {
+                let vb = buffer::upload_via_staging(
+                    device.handle(),
+                    &mem_props,
+                    device.queues.graphics,
+                    device.queue_families.graphics,
+                    &vertices,
+                    vk::BufferUsageFlags::VERTEX_BUFFER,
+                )?;
+                let ib = buffer::upload_via_staging(
+                    device.handle(),
+                    &mem_props,
+                    device.queues.graphics,
+                    device.queue_families.graphics,
+                    &indices,
+                    vk::BufferUsageFlags::INDEX_BUFFER,
+                )?;
+                (Some(vb), Some(ib))
+            }
+            None => (None, None),
+        };
+
+        let push_range = vk::PushConstantRange::default()
+            .stage_flags(vk::ShaderStageFlags::VERTEX)
+            .offset(0)
+            .size(std::mem::size_of::<[f32; 16]>() as u32);
+
+        let pipeline = match &swapchain {
+            Some(sc) => {
+                let binding = Vertex::binding();
+                let attributes = Vertex::attributes();
+                let desc = PipelineDesc {
+                    vertex_spv: QUAD_VERT_SPV,
+                    fragment_spv: QUAD_FRAG_SPV,
+                    color_format: sc.config.format.format,
+                    topology: vk::PrimitiveTopology::TRIANGLE_LIST,
+                    polygon_mode: vk::PolygonMode::FILL,
+                    cull_mode: vk::CullModeFlags::NONE, // permissive to start
+                    front_face: vk::FrontFace::COUNTER_CLOCKWISE,
+                    vertex_bindings: std::slice::from_ref(&binding),
+                    vertex_attributes: &attributes,
+                    push_constant_ranges: std::slice::from_ref(&push_range),
+                    depth_format: Some(DEPTH_FORMAT),
+                };
+                Some(GraphicsPipeline::create(device.handle(), &desc)?)
+            }
+            None => None,
+        };
+
         log_info!("rok-renderer: initialisation complete");
 
         Ok(Self {
             frame_sync,
             swapchain,
+            pipeline,
+            vertex_buffer,
+            index_buffer,
+            depth,
             device,
             physical_device: phys_device,
             surface,
@@ -171,6 +311,7 @@ impl Renderer {
             vsync: config.vsync,
             needs_resize: false,
             current_extent: initial_extent,
+            mem_props,
         })
     }
 
@@ -193,7 +334,7 @@ impl Renderer {
     ///
     /// Returns `true` if a frame was presented, `false` if skipped
     /// (e.g. window is minimized or no swapchain).
-    pub fn render(&mut self) -> bool {
+    pub fn render(&mut self, view: Mat4x4) -> bool {
         // No swapchain = headless / compute-only.
         if self.swapchain.is_none() || self.frame_sync.is_none() || self.surface.is_none() {
             return false;
@@ -215,17 +356,21 @@ impl Renderer {
         }
 
         // Safety: we checked all Options are Some above.
-        unsafe { self.render_frame() }
+        unsafe { self.render_frame(view) }
     }
 
     /// Core render loop. Assumes swapchain, frame_sync, and surface are Some.
     ///
     /// # Safety
-    /// Caller must guarantee swapchain, frame_sync, surface are all Some.
-    unsafe fn render_frame(&mut self) -> bool {
+    /// Caller must guarantee swapchain, frame_sync, surface, depth are all Some.
+    unsafe fn render_frame(&mut self, view: Mat4x4) -> bool {
         let swapchain = unsafe { self.swapchain.as_mut().unwrap_unchecked() };
         let frame_sync = unsafe { self.frame_sync.as_mut().unwrap_unchecked() };
+        let pipeline = self.pipeline.as_ref();
         let device = self.device.handle();
+        let depth = unsafe { self.depth.as_ref().unwrap_unchecked() };
+        let vertex_buffer = self.vertex_buffer.as_ref();
+        let index_buffer = self.index_buffer.as_ref();
 
         // Wait for this frame slot's previous work via timeline semaphore
         frame_sync.wait_for_current_frame(device);
@@ -265,6 +410,25 @@ impl Renderer {
 
             let _ = device.begin_command_buffer(cmd, &begin_info);
 
+            let depth_barrier = vk::ImageMemoryBarrier2::default()
+                .src_stage_mask(vk::PipelineStageFlags2::TOP_OF_PIPE)
+                .src_access_mask(vk::AccessFlags2::NONE)
+                .dst_stage_mask(
+                    vk::PipelineStageFlags2::EARLY_FRAGMENT_TESTS
+                        | vk::PipelineStageFlags2::LATE_FRAGMENT_TESTS,
+                )
+                .dst_access_mask(vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_WRITE)
+                .old_layout(vk::ImageLayout::UNDEFINED)
+                .new_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
+                .image(depth.image)
+                .subresource_range(vk::ImageSubresourceRange {
+                    aspect_mask: vk::ImageAspectFlags::DEPTH,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                });
+
             // Transition image: UNDEFINED → COLOR_ATTACHMENT_OPTIMAL
             let image_barrier_to_render = vk::ImageMemoryBarrier2::default()
                 .src_stage_mask(vk::PipelineStageFlags2::TOP_OF_PIPE)
@@ -282,8 +446,9 @@ impl Renderer {
                     layer_count: 1,
                 });
 
-            let dep_info = vk::DependencyInfo::default()
-                .image_memory_barriers(std::slice::from_ref(&image_barrier_to_render));
+            let barriers_to_render = [image_barrier_to_render, depth_barrier];
+
+            let dep_info = vk::DependencyInfo::default().image_memory_barriers(&barriers_to_render);
 
             device.cmd_pipeline_barrier2(cmd, &dep_info);
 
@@ -294,6 +459,13 @@ impl Renderer {
                 },
             };
 
+            let depth_clear = vk::ClearValue {
+                depth_stencil: vk::ClearDepthStencilValue {
+                    depth: 0.0,
+                    stencil: 0,
+                },
+            };
+
             let color_attachment = vk::RenderingAttachmentInfo::default()
                 .image_view(swapchain.image_views[image_index as usize])
                 .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
@@ -301,17 +473,66 @@ impl Renderer {
                 .store_op(vk::AttachmentStoreOp::STORE)
                 .clear_value(clear_value);
 
+            let depth_attachment = vk::RenderingAttachmentInfo::default()
+                .image_view(depth.view)
+                .image_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
+                .load_op(vk::AttachmentLoadOp::CLEAR)
+                .store_op(vk::AttachmentStoreOp::DONT_CARE) // depth isn't read after the frame
+                .clear_value(depth_clear);
+
             let rendering_info = vk::RenderingInfo::default()
                 .render_area(vk::Rect2D {
                     offset: vk::Offset2D { x: 0, y: 0 },
                     extent: swapchain.config.extent,
                 })
                 .layer_count(1)
-                .color_attachments(std::slice::from_ref(&color_attachment));
+                .color_attachments(std::slice::from_ref(&color_attachment))
+                .depth_attachment(&depth_attachment);
 
             device.cmd_begin_rendering(cmd, &rendering_info);
 
-            // (Future: record draw commands here)
+            if let (Some(gp), Some(vb), Some(ib)) = (pipeline, vertex_buffer, index_buffer) {
+                let extent = swapchain.config.extent;
+                let aspect = extent.width as f32 / extent.height as f32;
+
+                let proj = Mat4x4::perspective(60f32.to_radians(), aspect, 0.1, 100.0);
+                // view comes from the engine's camera; cube is static (model = identity).
+                let mvp = (proj * view).to_cols_array();
+                // Reinterpret [f32;16] as bytes for the push. POD, dep-free.
+                let mvp_bytes = unsafe {
+                    std::slice::from_raw_parts(
+                        mvp.as_ptr() as *const u8,
+                        std::mem::size_of::<[f32; 16]>(),
+                    )
+                };
+
+                let viewport = vk::Viewport {
+                    x: 0.0,
+                    y: extent.height as f32,
+                    width: extent.width as f32,
+                    height: -(extent.height as f32),
+                    min_depth: 0.0,
+                    max_depth: 1.0,
+                };
+                let scissor = vk::Rect2D {
+                    offset: vk::Offset2D { x: 0, y: 0 },
+                    extent,
+                };
+
+                device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, gp.pipeline);
+                device.cmd_set_viewport(cmd, 0, std::slice::from_ref(&viewport));
+                device.cmd_set_scissor(cmd, 0, std::slice::from_ref(&scissor));
+                device.cmd_push_constants(
+                    cmd,
+                    gp.layout,
+                    vk::ShaderStageFlags::VERTEX,
+                    0,
+                    mvp_bytes,
+                );
+                device.cmd_bind_vertex_buffers(cmd, 0, std::slice::from_ref(&vb.buffer), &[0]);
+                device.cmd_bind_index_buffer(cmd, ib.buffer, 0, vk::IndexType::UINT16);
+                device.cmd_draw_indexed(cmd, 36, 1, 0, 0, 0);
+            }
 
             device.cmd_end_rendering(cmd);
 
@@ -452,6 +673,19 @@ impl Renderer {
         let new_image_count = new_swapchain.images.len() as u32;
         self.swapchain = Some(new_swapchain);
 
+        // Rebuild depth to new extent.
+        unsafe {
+            if let Some(ref mut depth) = self.depth {
+                depth.destroy(self.device.handle());
+            }
+        }
+        self.depth = Some(DepthImage::new(
+            self.device.handle(),
+            &self.mem_props,
+            self.current_extent,
+            DEPTH_FORMAT,
+        )?);
+
         // Recreate frame sync if image count changed (e.g. present mode switch).
         if let Some(ref frame_sync) = self.frame_sync {
             if frame_sync.frames.len() as u32 != new_image_count {
@@ -484,6 +718,21 @@ impl Drop for Renderer {
         self.device.wait_idle();
 
         unsafe {
+            if let Some(ref mut vb) = self.vertex_buffer {
+                vb.destroy(self.device.handle());
+            }
+            if let Some(ref mut ib) = self.index_buffer {
+                ib.destroy(self.device.handle());
+            }
+
+            if let Some(ref mut depth) = self.depth {
+                depth.destroy(self.device.handle());
+            }
+
+            if let Some(ref mut pipeline) = self.pipeline {
+                pipeline.destroy(self.device.handle());
+            }
+
             if let Some(ref mut frame_sync) = self.frame_sync {
                 frame_sync.destroy(self.device.handle());
             }

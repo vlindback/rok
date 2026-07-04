@@ -4,7 +4,10 @@
 
 use std::{num::NonZeroU32, sync::atomic::AtomicBool};
 
-use crate::{api::build, error::EngineError, frame::FrameInput, input::InputState, target::Target};
+use crate::{
+    api::build, camera::OrbitCamera, error::EngineError, frame::FrameInput, input::InputState,
+    target::Target,
+};
 use rok_abi::{EngineApi, NativeSurfaceHandle, engine_api::EngineHandle, input::ScanCode};
 use rok_log::log_info;
 use rok_renderer::{Renderer, RendererConfig};
@@ -20,6 +23,7 @@ pub struct Engine {
     renderer: Renderer,
     input_state: InputState,
     should_quit: AtomicBool,
+    camera: OrbitCamera,
 }
 
 impl Engine {
@@ -39,6 +43,7 @@ impl Engine {
             target: None,
             input_state: InputState::new(),
             should_quit: AtomicBool::new(false),
+            camera: OrbitCamera::new(),
         });
 
         let handle = (&mut *engine as *mut Engine).cast::<EngineHandle>();
@@ -68,6 +73,8 @@ impl Engine {
         }
 
         self.input_state.ingest(input.events);
+        self.camera.update(&self.input_state, input.delta_time);
+
         if let Some(target) = self.target.as_mut() {
             target.update(input.delta_time);
         }
@@ -79,7 +86,7 @@ impl Engine {
     }
 
     pub fn render(&mut self) {
-        self.renderer.render();
+        self.renderer.render(self.camera.view());
 
         if let Some(target) = self.target.as_mut() {
             target.render();
