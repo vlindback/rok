@@ -59,6 +59,10 @@ impl Engine {
             }
         }
 
+        //scene
+        //    .instances
+        //    .push(Transform::from_position(Vec3::new(0.0, 0.0, 0.0)));
+
         let mut engine = Box::new(Engine {
             renderer,
             api: None,

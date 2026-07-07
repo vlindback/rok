@@ -21,6 +21,7 @@ pub(crate) struct PipelineDesc<'a> {
     pub vertex_attributes: &'a [vk::VertexInputAttributeDescription],
     pub push_constant_ranges: &'a [vk::PushConstantRange],
     pub depth_format: Option<vk::Format>, // Some = depth test/write on, reverse-Z
+    pub set_layouts: &'a [vk::DescriptorSetLayout],
 }
 
 pub(crate) struct GraphicsPipeline {
@@ -77,8 +78,9 @@ impl GraphicsPipeline {
         let dynamic_state =
             vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic_states);
 
-        let layout_info =
-            vk::PipelineLayoutCreateInfo::default().push_constant_ranges(desc.push_constant_ranges);
+        let layout_info = vk::PipelineLayoutCreateInfo::default()
+            .set_layouts(desc.set_layouts)
+            .push_constant_ranges(desc.push_constant_ranges);
         let layout = check!(
             unsafe { device.create_pipeline_layout(&layout_info, None) },
             "create pipeline layout"

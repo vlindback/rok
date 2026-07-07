@@ -76,6 +76,32 @@ fn create_buffer(
     })
 }
 
+/// Host-visible, coherent buffer filled with `data` (TRANSFER_SRC). The
+/// staging half, exposed so image uploads can copy it to an image.
+pub(crate) fn create_host_buffer<T: Copy>(
+    device: &ash::Device,
+    mem_props: &vk::PhysicalDeviceMemoryProperties,
+    data: &[T],
+) -> RendererResult<Buffer> {
+    let size = std::mem::size_of_val(data) as vk::DeviceSize;
+    let mut staging = create_buffer(
+        device,
+        mem_props,
+        size,
+        vk::BufferUsageFlags::TRANSFER_SRC,
+        vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+    )?;
+    unsafe {
+        let ptr = check!(
+            device.map_memory(staging.memory, 0, size, vk::MemoryMapFlags::empty()),
+            "map staging"
+        )? as *mut T;
+        ptr.copy_from_nonoverlapping(data.as_ptr(), data.len());
+        device.unmap_memory(staging.memory);
+    }
+    Ok(staging)
+}
+
 /// Record into a one-shot command buffer, submit to `queue`, block until done.
 /// Waits on a per-submit fence rather than the whole queue.
 pub(crate) fn immediate_submit<F>(

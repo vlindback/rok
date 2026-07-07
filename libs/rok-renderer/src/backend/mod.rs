@@ -7,6 +7,7 @@
 // Vulkan handle and destroys it on drop.
 
 pub(crate) mod buffer;
+pub(crate) mod descriptor;
 pub(crate) mod device;
 pub(crate) mod frame;
 pub(crate) mod image;
@@ -15,4 +16,5 @@ pub(crate) mod physical_device;
 pub(crate) mod pipeline;
 pub(crate) mod surface;
 pub(crate) mod swapchain;
+pub(crate) mod texture;
 pub(crate) mod vertex;

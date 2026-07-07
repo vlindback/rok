@@ -13,8 +13,11 @@
 use std::num::NonZeroU32;
 
 use ash::vk;
+use rok_math::vec2::Vec2;
 
 use crate::backend;
+use crate::backend::descriptor::TextureDescriptor;
+use crate::backend::texture::Texture;
 use crate::error::{RendererError, RendererResult};
 use backend::device::VulkanDevice;
 use backend::frame::FrameSync;
@@ -37,6 +40,8 @@ pub use crate::command::RenderCommand;
 
 const QUAD_VERT_SPV: &[u8] = include_bytes!("../shaders/quad.vert.spv");
 const QUAD_FRAG_SPV: &[u8] = include_bytes!("../shaders/quad.frag.spv");
+
+const CAT_PNG: &[u8] = include_bytes!("../textures/grouchy_cat.png");
 
 const DEPTH_FORMAT: vk::Format = vk::Format::D32_SFLOAT; // universal for depth attachment; a
 // production path would query support
@@ -85,6 +90,8 @@ pub struct Renderer {
     vertex_buffer: Option<Buffer>,
     index_buffer: Option<Buffer>,
     depth: Option<DepthImage>,
+    texture: Option<Texture>,
+    descriptor: Option<TextureDescriptor>,
 
     // Device
     device: VulkanDevice,
@@ -197,51 +204,180 @@ impl Renderer {
             None => None,
         };
 
+        let texture = match &swapchain {
+            Some(_) => {
+                let decoder = png::Decoder::new(std::io::Cursor::new(CAT_PNG));
+                let mut reader = decoder
+                    .read_info()
+                    .map_err(|_| RendererError::Config("png read_info failed"))?;
+                let mut buf = vec![0u8; reader.output_buffer_size()];
+                let frame = reader
+                    .next_frame(&mut buf)
+                    .map_err(|_| RendererError::Config("png decode failed"))?;
+                // Ensure RGBA8. If your cat exported as RGB, the crate can be told
+                // to expand — simplest is to export/verify RGBA. buf[..frame.buffer_size()]
+                // holds width*height*4 bytes when RGBA8.
+                let pixels = &buf[..frame.buffer_size()];
+                Some(Texture::from_rgba8(
+                    device.handle(),
+                    &mem_props,
+                    device.queues.graphics,
+                    device.queue_families.graphics,
+                    frame.width,
+                    frame.height,
+                    pixels,
+                )?)
+            }
+            None => None,
+        };
+
+        let descriptor = match &texture {
+            Some(tex) => Some(TextureDescriptor::new(
+                device.handle(),
+                tex.view,
+                tex.sampler,
+            )?),
+            None => None,
+        };
+
         // Unit cube centered at origin; color from corner position.
         let h = 0.5;
         let vertices = [
-            Vertex {
-                position: Vec3::new(-h, -h, -h),
-                color: Vec3::new(0.0, 0.0, 0.0),
-            },
-            Vertex {
-                position: Vec3::new(h, -h, -h),
-                color: Vec3::new(1.0, 0.0, 0.0),
-            },
-            Vertex {
-                position: Vec3::new(h, h, -h),
-                color: Vec3::new(1.0, 1.0, 0.0),
-            },
-            Vertex {
-                position: Vec3::new(-h, h, -h),
-                color: Vec3::new(0.0, 1.0, 0.0),
-            },
+            // +Z front (red)
             Vertex {
                 position: Vec3::new(-h, -h, h),
-                color: Vec3::new(0.0, 0.0, 1.0),
+                color: Vec3::new(1.0, 0.3, 0.3),
+                uv: Vec2::new(0.0, 1.0),
             },
             Vertex {
                 position: Vec3::new(h, -h, h),
-                color: Vec3::new(1.0, 0.0, 1.0),
+                color: Vec3::new(1.0, 0.3, 0.3),
+                uv: Vec2::new(1.0, 1.0),
             },
             Vertex {
                 position: Vec3::new(h, h, h),
-                color: Vec3::new(1.0, 1.0, 1.0),
+                color: Vec3::new(1.0, 0.3, 0.3),
+                uv: Vec2::new(1.0, 0.0),
             },
             Vertex {
                 position: Vec3::new(-h, h, h),
-                color: Vec3::new(0.0, 1.0, 1.0),
+                color: Vec3::new(1.0, 0.3, 0.3),
+                uv: Vec2::new(0.0, 0.0),
+            },
+            // -Z back (green)
+            Vertex {
+                position: Vec3::new(h, -h, -h),
+                color: Vec3::new(0.3, 1.0, 0.3),
+                uv: Vec2::new(0.0, 1.0),
+            },
+            Vertex {
+                position: Vec3::new(-h, -h, -h),
+                color: Vec3::new(0.3, 1.0, 0.3),
+                uv: Vec2::new(1.0, 1.0),
+            },
+            Vertex {
+                position: Vec3::new(-h, h, -h),
+                color: Vec3::new(0.3, 1.0, 0.3),
+                uv: Vec2::new(1.0, 0.0),
+            },
+            Vertex {
+                position: Vec3::new(h, h, -h),
+                color: Vec3::new(0.3, 1.0, 0.3),
+                uv: Vec2::new(0.0, 0.0),
+            },
+            // +X right (blue)
+            Vertex {
+                position: Vec3::new(h, -h, h),
+                color: Vec3::new(0.3, 0.3, 1.0),
+                uv: Vec2::new(0.0, 1.0),
+            },
+            Vertex {
+                position: Vec3::new(h, -h, -h),
+                color: Vec3::new(0.3, 0.3, 1.0),
+                uv: Vec2::new(1.0, 1.0),
+            },
+            Vertex {
+                position: Vec3::new(h, h, -h),
+                color: Vec3::new(0.3, 0.3, 1.0),
+                uv: Vec2::new(1.0, 0.0),
+            },
+            Vertex {
+                position: Vec3::new(h, h, h),
+                color: Vec3::new(0.3, 0.3, 1.0),
+                uv: Vec2::new(0.0, 0.0),
+            },
+            // -X left (yellow)
+            Vertex {
+                position: Vec3::new(-h, -h, -h),
+                color: Vec3::new(1.0, 1.0, 0.3),
+                uv: Vec2::new(0.0, 1.0),
+            },
+            Vertex {
+                position: Vec3::new(-h, -h, h),
+                color: Vec3::new(1.0, 1.0, 0.3),
+                uv: Vec2::new(1.0, 1.0),
+            },
+            Vertex {
+                position: Vec3::new(-h, h, h),
+                color: Vec3::new(1.0, 1.0, 0.3),
+                uv: Vec2::new(1.0, 0.0),
+            },
+            Vertex {
+                position: Vec3::new(-h, h, -h),
+                color: Vec3::new(1.0, 1.0, 0.3),
+                uv: Vec2::new(0.0, 0.0),
+            },
+            // +Y top (magenta)
+            Vertex {
+                position: Vec3::new(-h, h, h),
+                color: Vec3::new(1.0, 0.3, 1.0),
+                uv: Vec2::new(0.0, 1.0),
+            },
+            Vertex {
+                position: Vec3::new(h, h, h),
+                color: Vec3::new(1.0, 0.3, 1.0),
+                uv: Vec2::new(1.0, 1.0),
+            },
+            Vertex {
+                position: Vec3::new(h, h, -h),
+                color: Vec3::new(1.0, 0.3, 1.0),
+                uv: Vec2::new(1.0, 0.0),
+            },
+            Vertex {
+                position: Vec3::new(-h, h, -h),
+                color: Vec3::new(1.0, 0.3, 1.0),
+                uv: Vec2::new(0.0, 0.0),
+            },
+            // -Y bottom (cyan)
+            Vertex {
+                position: Vec3::new(-h, -h, -h),
+                color: Vec3::new(0.3, 1.0, 1.0),
+                uv: Vec2::new(0.0, 1.0),
+            },
+            Vertex {
+                position: Vec3::new(h, -h, -h),
+                color: Vec3::new(0.3, 1.0, 1.0),
+                uv: Vec2::new(1.0, 1.0),
+            },
+            Vertex {
+                position: Vec3::new(h, -h, h),
+                color: Vec3::new(0.3, 1.0, 1.0),
+                uv: Vec2::new(1.0, 0.0),
+            },
+            Vertex {
+                position: Vec3::new(-h, -h, h),
+                color: Vec3::new(0.3, 1.0, 1.0),
+                uv: Vec2::new(0.0, 0.0),
             },
         ];
-        // Wound CCW-outward, so BACK culling will work when you flip it. With
-        // CULL_NONE now, winding is irrelevant — depth alone makes it solid.
+
         let indices: [u16; 36] = [
-            4, 5, 6, 6, 7, 4, // +Z front
-            1, 0, 3, 3, 2, 1, // -Z back
-            5, 1, 2, 2, 6, 5, // +X right
-            0, 4, 7, 7, 3, 0, // -X left
-            3, 7, 6, 6, 2, 3, // +Y top
-            0, 1, 5, 5, 4, 0, // -Y bottom
+            0, 1, 2, 2, 3, 0, // +Z
+            4, 5, 6, 6, 7, 4, // -Z
+            8, 9, 10, 10, 11, 8, // +X
+            12, 13, 14, 14, 15, 12, // -X
+            16, 17, 18, 18, 19, 16, // +Y
+            20, 21, 22, 22, 23, 20, // -Y
         ];
 
         let (vertex_buffer, index_buffer) = match &swapchain {
@@ -272,6 +408,8 @@ impl Renderer {
             .offset(0)
             .size(std::mem::size_of::<[f32; 16]>() as u32);
 
+        let set_layouts = descriptor.as_ref().map(|d| d.layout);
+
         let pipeline = match &swapchain {
             Some(sc) => {
                 let binding = Vertex::binding();
@@ -288,6 +426,10 @@ impl Renderer {
                     vertex_attributes: &attributes,
                     push_constant_ranges: std::slice::from_ref(&push_range),
                     depth_format: Some(DEPTH_FORMAT),
+                    set_layouts: set_layouts
+                        .as_ref()
+                        .map(std::slice::from_ref)
+                        .unwrap_or(&[]),
                 };
                 Some(GraphicsPipeline::create(device.handle(), &desc)?)
             }
@@ -302,6 +444,8 @@ impl Renderer {
             pipeline,
             vertex_buffer,
             index_buffer,
+            texture,
+            descriptor,
             depth,
             device,
             physical_device: phys_device,
@@ -509,6 +653,18 @@ impl Renderer {
                 };
 
                 device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, gp.pipeline);
+
+                if let Some(desc) = self.descriptor.as_ref() {
+                    device.cmd_bind_descriptor_sets(
+                        cmd,
+                        vk::PipelineBindPoint::GRAPHICS,
+                        gp.layout,
+                        0, // first set
+                        std::slice::from_ref(&desc.set),
+                        &[], // no dynamic offsets
+                    );
+                }
+
                 device.cmd_set_viewport(cmd, 0, std::slice::from_ref(&viewport));
                 device.cmd_set_scissor(cmd, 0, std::slice::from_ref(&scissor));
                 device.cmd_bind_vertex_buffers(cmd, 0, std::slice::from_ref(&vb.buffer), &[0]);
@@ -720,12 +876,21 @@ impl Drop for Renderer {
     fn drop(&mut self) {
         self.device.wait_idle();
 
+        // TODO: this shouldnt be manual like this.
+
         unsafe {
             if let Some(ref mut vb) = self.vertex_buffer {
                 vb.destroy(self.device.handle());
             }
             if let Some(ref mut ib) = self.index_buffer {
                 ib.destroy(self.device.handle());
+            }
+
+            if let Some(ref mut descriptor) = self.descriptor {
+                descriptor.destroy(self.device.handle());
+            }
+            if let Some(ref mut texture) = self.texture {
+                texture.destroy(self.device.handle());
             }
 
             if let Some(ref mut depth) = self.depth {
