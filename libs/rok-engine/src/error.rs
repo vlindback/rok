@@ -6,7 +6,7 @@ use std::fmt;
 pub enum EngineError {
     Library(libloading::Error),
     Io(std::io::Error),
-    Renderer(rok_renderer::error::RendererError),
+    Renderer(rok_renderer::RendererError),
     EngineInitFailure,
     TargetInitFailure,
 }
@@ -23,8 +23,8 @@ impl From<libloading::Error> for EngineError {
     }
 }
 
-impl From<rok_renderer::error::RendererError> for EngineError {
-    fn from(err: rok_renderer::error::RendererError) -> Self {
+impl From<rok_renderer::RendererError> for EngineError {
+    fn from(err: rok_renderer::RendererError) -> Self {
         EngineError::Renderer(err)
     }
 }
