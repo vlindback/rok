@@ -227,7 +227,7 @@ impl Vec3 {
     /// normalization (length cutoff = sqrt = 1e-4).
     const NORMALIZE_EPS: f32 = 1e-8;
 
-    pub fn new(x: f32, y: f32, z: f32) -> Self {
+    pub const fn new(x: f32, y: f32, z: f32) -> Self {
         Self { x, y, z }
     }
 

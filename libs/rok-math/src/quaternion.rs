@@ -30,7 +30,7 @@ pub struct Quat {
     w: f32,
 }
 
-use crate::vec3::Vec3;
+use crate::{mat4x4::Mat4x4, vec3::Vec3};
 use std::ops::Mul;
 
 impl Quat {
@@ -251,6 +251,45 @@ impl Quat {
             z: a * self.z + b * other.z,
             w: a * self.w + b * other.w,
         }
+    }
+
+    pub fn to_mat4x4(&self) -> Mat4x4 {
+        let (x, y, z, w) = (self.x, self.y, self.z, self.w);
+
+        let x2 = x + x;
+        let y2 = y + y;
+        let z2 = z + z;
+
+        let xx = x * x2;
+        let xy = x * y2;
+        let xz = x * z2;
+
+        let yy = y * y2;
+        let yz = y * z2;
+        let zz = z * z2;
+
+        let wx = w * x2;
+        let wy = w * y2;
+        let wz = w * z2;
+
+        Mat4x4::from_cols_array(
+            1.0 - (yy + zz),
+            xy + wz,
+            xz - wy,
+            0.0,
+            xy - wz,
+            1.0 - (xx + zz),
+            yz + wx,
+            0.0,
+            xz + wy,
+            yz - wx,
+            1.0 - (xx + yy),
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+        )
     }
 }
 
