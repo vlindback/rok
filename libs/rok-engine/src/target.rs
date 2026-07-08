@@ -1,4 +1,4 @@
-// target.s
+// target.rs
 
 use rok_abi::{
     EngineApi, HotReloadBuffer, TARGET_ENTRY_SYMBOL, TargetState, TargetVTable, TargetVTableGetter,

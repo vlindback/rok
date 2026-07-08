@@ -12,6 +12,7 @@ pub(crate) mod device;
 pub(crate) mod frame;
 pub(crate) mod image;
 pub(crate) mod instance;
+pub(crate) mod light;
 pub(crate) mod physical_device;
 pub(crate) mod pipeline;
 pub(crate) mod surface;

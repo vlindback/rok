@@ -17,6 +17,7 @@ use rok_math::vec2::Vec2;
 
 use crate::backend;
 use crate::backend::descriptor::TextureDescriptor;
+use crate::backend::light::LightUbo;
 use crate::backend::texture::Texture;
 use crate::error::{RendererError, RendererResult};
 use backend::device::VulkanDevice;
@@ -92,6 +93,7 @@ pub struct Renderer {
     depth: Option<DepthImage>,
     texture: Option<Texture>,
     descriptor: Option<TextureDescriptor>,
+    light_buffer: Option<Buffer>,
 
     // Device
     device: VulkanDevice,
@@ -231,143 +233,169 @@ impl Renderer {
             None => None,
         };
 
-        let descriptor = match &texture {
-            Some(tex) => Some(TextureDescriptor::new(
+        // TODO: remove later
+        let light = LightUbo {
+            direction: {
+                // normalize (-0.5, -1.0, -0.3): down, slightly left and forward
+                let (x, y, z) = (-0.5f32, -1.0, -0.3);
+                let len = (x * x + y * y + z * z).sqrt();
+                [x / len, y / len, z / len]
+            },
+            _pad0: 0.0,
+            color: [1.0, 1.0, 1.0],
+            _pad1: 0.0,
+        };
+
+        let light_buffer = match &swapchain {
+            Some(_) => Some(buffer::upload_via_staging(
+                device.handle(),
+                &mem_props,
+                device.queues.graphics,
+                device.queue_families.graphics,
+                std::slice::from_ref(&light),
+                vk::BufferUsageFlags::UNIFORM_BUFFER,
+            )?),
+            None => None,
+        };
+
+        let descriptor = match (&texture, &light_buffer) {
+            (Some(tex), Some(lb)) => Some(TextureDescriptor::new(
                 device.handle(),
                 tex.view,
                 tex.sampler,
+                lb.buffer,
             )?),
-            None => None,
+            _ => None,
         };
 
         // Unit cube centered at origin; color from corner position.
         let h = 0.5;
         let vertices = [
-            // +Z front (red)
+            // +Z front, n = (0,0,1)
             Vertex {
                 position: Vec3::new(-h, -h, h),
-                color: Vec3::new(1.0, 0.3, 0.3),
                 uv: Vec2::new(0.0, 1.0),
+                normal: Vec3::new(0.0, 0.0, 1.0),
             },
             Vertex {
                 position: Vec3::new(h, -h, h),
-                color: Vec3::new(1.0, 0.3, 0.3),
                 uv: Vec2::new(1.0, 1.0),
+                normal: Vec3::new(0.0, 0.0, 1.0),
             },
             Vertex {
                 position: Vec3::new(h, h, h),
-                color: Vec3::new(1.0, 0.3, 0.3),
                 uv: Vec2::new(1.0, 0.0),
+                normal: Vec3::new(0.0, 0.0, 1.0),
             },
             Vertex {
                 position: Vec3::new(-h, h, h),
-                color: Vec3::new(1.0, 0.3, 0.3),
                 uv: Vec2::new(0.0, 0.0),
+                normal: Vec3::new(0.0, 0.0, 1.0),
             },
-            // -Z back (green)
+            // -Z back, n = (0,0,-1)
             Vertex {
                 position: Vec3::new(h, -h, -h),
-                color: Vec3::new(0.3, 1.0, 0.3),
                 uv: Vec2::new(0.0, 1.0),
+                normal: Vec3::new(0.0, 0.0, -1.0),
             },
             Vertex {
                 position: Vec3::new(-h, -h, -h),
-                color: Vec3::new(0.3, 1.0, 0.3),
                 uv: Vec2::new(1.0, 1.0),
+                normal: Vec3::new(0.0, 0.0, -1.0),
             },
             Vertex {
                 position: Vec3::new(-h, h, -h),
-                color: Vec3::new(0.3, 1.0, 0.3),
                 uv: Vec2::new(1.0, 0.0),
+                normal: Vec3::new(0.0, 0.0, -1.0),
             },
             Vertex {
                 position: Vec3::new(h, h, -h),
-                color: Vec3::new(0.3, 1.0, 0.3),
                 uv: Vec2::new(0.0, 0.0),
+                normal: Vec3::new(0.0, 0.0, -1.0),
             },
-            // +X right (blue)
+            // +X right, n = (1,0,0)
             Vertex {
                 position: Vec3::new(h, -h, h),
-                color: Vec3::new(0.3, 0.3, 1.0),
                 uv: Vec2::new(0.0, 1.0),
+                normal: Vec3::new(1.0, 0.0, 0.0),
             },
             Vertex {
                 position: Vec3::new(h, -h, -h),
-                color: Vec3::new(0.3, 0.3, 1.0),
                 uv: Vec2::new(1.0, 1.0),
+                normal: Vec3::new(1.0, 0.0, 0.0),
             },
             Vertex {
                 position: Vec3::new(h, h, -h),
-                color: Vec3::new(0.3, 0.3, 1.0),
                 uv: Vec2::new(1.0, 0.0),
+                normal: Vec3::new(1.0, 0.0, 0.0),
             },
             Vertex {
                 position: Vec3::new(h, h, h),
-                color: Vec3::new(0.3, 0.3, 1.0),
                 uv: Vec2::new(0.0, 0.0),
+                normal: Vec3::new(1.0, 0.0, 0.0),
             },
-            // -X left (yellow)
+            // -X left, n = (-1,0,0)
             Vertex {
                 position: Vec3::new(-h, -h, -h),
-                color: Vec3::new(1.0, 1.0, 0.3),
                 uv: Vec2::new(0.0, 1.0),
+                normal: Vec3::new(-1.0, 0.0, 0.0),
             },
             Vertex {
                 position: Vec3::new(-h, -h, h),
-                color: Vec3::new(1.0, 1.0, 0.3),
                 uv: Vec2::new(1.0, 1.0),
+                normal: Vec3::new(-1.0, 0.0, 0.0),
             },
             Vertex {
                 position: Vec3::new(-h, h, h),
-                color: Vec3::new(1.0, 1.0, 0.3),
                 uv: Vec2::new(1.0, 0.0),
+                normal: Vec3::new(-1.0, 0.0, 0.0),
             },
             Vertex {
                 position: Vec3::new(-h, h, -h),
-                color: Vec3::new(1.0, 1.0, 0.3),
                 uv: Vec2::new(0.0, 0.0),
+                normal: Vec3::new(-1.0, 0.0, 0.0),
             },
-            // +Y top (magenta)
+            // +Y top, n = (0,1,0)
             Vertex {
                 position: Vec3::new(-h, h, h),
-                color: Vec3::new(1.0, 0.3, 1.0),
                 uv: Vec2::new(0.0, 1.0),
+                normal: Vec3::new(0.0, 1.0, 0.0),
             },
             Vertex {
                 position: Vec3::new(h, h, h),
-                color: Vec3::new(1.0, 0.3, 1.0),
                 uv: Vec2::new(1.0, 1.0),
+                normal: Vec3::new(0.0, 1.0, 0.0),
             },
             Vertex {
                 position: Vec3::new(h, h, -h),
-                color: Vec3::new(1.0, 0.3, 1.0),
                 uv: Vec2::new(1.0, 0.0),
+                normal: Vec3::new(0.0, 1.0, 0.0),
             },
             Vertex {
                 position: Vec3::new(-h, h, -h),
-                color: Vec3::new(1.0, 0.3, 1.0),
                 uv: Vec2::new(0.0, 0.0),
+                normal: Vec3::new(0.0, 1.0, 0.0),
             },
-            // -Y bottom (cyan)
+            // -Y bottom, n = (0,-1,0)
             Vertex {
                 position: Vec3::new(-h, -h, -h),
-                color: Vec3::new(0.3, 1.0, 1.0),
                 uv: Vec2::new(0.0, 1.0),
+                normal: Vec3::new(0.0, -1.0, 0.0),
             },
             Vertex {
                 position: Vec3::new(h, -h, -h),
-                color: Vec3::new(0.3, 1.0, 1.0),
                 uv: Vec2::new(1.0, 1.0),
+                normal: Vec3::new(0.0, -1.0, 0.0),
             },
             Vertex {
                 position: Vec3::new(h, -h, h),
-                color: Vec3::new(0.3, 1.0, 1.0),
                 uv: Vec2::new(1.0, 0.0),
+                normal: Vec3::new(0.0, -1.0, 0.0),
             },
             Vertex {
                 position: Vec3::new(-h, -h, h),
-                color: Vec3::new(0.3, 1.0, 1.0),
                 uv: Vec2::new(0.0, 0.0),
+                normal: Vec3::new(0.0, -1.0, 0.0),
             },
         ];
 
@@ -406,7 +434,7 @@ impl Renderer {
         let push_range = vk::PushConstantRange::default()
             .stage_flags(vk::ShaderStageFlags::VERTEX)
             .offset(0)
-            .size(std::mem::size_of::<[f32; 16]>() as u32);
+            .size(std::mem::size_of::<[f32; 32]>() as u32);
 
         let set_layouts = descriptor.as_ref().map(|d| d.layout);
 
@@ -446,6 +474,7 @@ impl Renderer {
             index_buffer,
             texture,
             descriptor,
+            light_buffer,
             depth,
             device,
             physical_device: phys_device,
@@ -675,17 +704,20 @@ impl Renderer {
                 for &command in commands {
                     match command {
                         RenderCommand::DrawMesh { model } => {
-                            let mvp = (proj * view * model).to_cols_array();
-                            let mvp_bytes = std::slice::from_raw_parts(
-                                mvp.as_ptr() as *const u8,
-                                std::mem::size_of::<[f32; 16]>(),
+                            let mvp = proj * view * model;
+                            let mut push = [0f32; 32];
+                            push[..16].copy_from_slice(&mvp.to_cols_array());
+                            push[16..].copy_from_slice(&model.to_cols_array());
+                            let push_bytes = std::slice::from_raw_parts(
+                                push.as_ptr() as *const u8,
+                                std::mem::size_of::<[f32; 32]>(),
                             );
                             device.cmd_push_constants(
                                 cmd,
                                 gp.layout,
                                 vk::ShaderStageFlags::VERTEX,
                                 0,
-                                mvp_bytes,
+                                push_bytes,
                             );
                             device.cmd_draw_indexed(cmd, 36, 1, 0, 0, 0);
                         }
@@ -884,6 +916,9 @@ impl Drop for Renderer {
             }
             if let Some(ref mut ib) = self.index_buffer {
                 ib.destroy(self.device.handle());
+            }
+            if let Some(ref mut lb) = self.light_buffer {
+                lb.destroy(self.device.handle());
             }
 
             if let Some(ref mut descriptor) = self.descriptor {
