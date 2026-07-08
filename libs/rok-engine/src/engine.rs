@@ -44,24 +44,30 @@ impl Engine {
         let renderer = Renderer::new(&renderer_config).map_err(EngineError::Renderer)?;
 
         let mut scene = Scene::new();
-        let n = 4; // 4x4x4 = 64 cubes
-        let spacing = 2.0;
-        let offset = (n as f32 - 1.0) * spacing * 0.5; // center the grid on the origin
-        for x in 0..n {
-            for y in 0..n {
-                for z in 0..n {
-                    scene.instances.push(Transform::from_position(Vec3::new(
-                        x as f32 * spacing - offset,
-                        y as f32 * spacing - offset,
-                        z as f32 * spacing - offset,
-                    )));
-                }
-            }
-        }
+        //let n = 4; // 4x4x4 = 64 cubes
+        //let spacing = 2.0;
+        //let offset = (n as f32 - 1.0) * spacing * 0.5; // center the grid on the origin
+        // for x in 0..n {
+        //     for y in 0..n {
+        //         for z in 0..n {
+        //             scene.instances.push(Transform::from_position(Vec3::new(
+        //                 x as f32 * spacing - offset,
+        //                 y as f32 * spacing - offset,
+        //                 z as f32 * spacing - offset,
+        //             )));
+        //         }
+        //     }
+        // }
 
-        //scene
-        //    .instances
-        //    .push(Transform::from_position(Vec3::new(0.0, 0.0, 0.0)));
+        // scene
+        //     .instances
+        //     .push(Transform::from_position(Vec3::new(0.0, 0.0, 0.0)));
+
+        scene.instances.push(Transform {
+            position: Vec3::new(0.0, 0.0, 0.0),
+            rotation: Quat::from_euler(0.6, 0.4, 0.0), // any non-axis-aligned tilt
+            scale: Vec3::new(1.0, 1.0, 1.0),
+        });
 
         let mut engine = Box::new(Engine {
             renderer,
