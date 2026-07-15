@@ -29,6 +29,7 @@ impl Texture {
         width: u32,
         height: u32,
         pixels: &[u8],
+        format: vk::Format,
     ) -> RendererResult<Self> {
         let expected = (width as usize) * (height as usize) * 4;
         if pixels.len() != expected {

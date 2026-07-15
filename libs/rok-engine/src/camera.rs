@@ -34,6 +34,20 @@ impl OrbitCamera {
         }
     }
 
+    pub fn eye(&self) -> Vec3 {
+        let (sy, cy) = self.yaw.sin_cos();
+        let (sp, cp) = self.pitch.sin_cos();
+        Vec3::new(
+            self.target.x() + self.distance * cp * sy,
+            self.target.y() + self.distance * sp,
+            self.target.z() + self.distance * cp * cy,
+        )
+    }
+
+    pub fn view(&self) -> Mat4x4 {
+        Mat4x4::look_at(self.eye(), self.target, Vec3::new(0.0, 1.0, 0.0))
+    }
+
     pub fn update(&mut self, input: &InputState, dt: f32) {
         // Mouse delta -> orbit. Total rotation tracks total mouse movement,
         // so this is inherently frame-rate independent (no dt needed).
@@ -53,20 +67,6 @@ impl OrbitCamera {
             self.distance += self.zoom_speed * dt; // Q out
         }
         self.distance = self.distance.clamp(self.min_distance, self.max_distance);
-    }
-
-    pub fn view(&self) -> Mat4x4 {
-        // Spherical -> cartesian offset from the target.
-        // At yaw=0,pitch=0 this is (0,0,distance). i.e. straight down +Z,
-        // identical to the old fixed camera.
-        let (sy, cy) = self.yaw.sin_cos();
-        let (sp, cp) = self.pitch.sin_cos();
-        let eye = Vec3::new(
-            self.target.x() + self.distance * cp * sy,
-            self.target.y() + self.distance * sp,
-            self.target.z() + self.distance * cp * cy,
-        );
-        Mat4x4::look_at(eye, self.target, Vec3::new(0.0, 1.0, 0.0))
     }
 }
 

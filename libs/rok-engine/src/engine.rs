@@ -128,7 +128,7 @@ impl Engine {
         }
 
         self.renderer
-            .render(self.camera.view(), &self.render_commands);
+            .render(self.camera.view(), self.camera.eye(), &self.render_commands);
 
         if let Some(target) = self.target.as_mut() {
             target.render();
