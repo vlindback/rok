@@ -7,6 +7,8 @@ pub enum EngineError {
     Library(libloading::Error),
     Io(std::io::Error),
     Renderer(rok_renderer::RendererError),
+    Utf8(std::str::Utf8Error),
+    FromUtf8(std::string::FromUtf8Error),
     EngineInitFailure,
     TargetInitFailure,
 }
@@ -29,12 +31,26 @@ impl From<rok_renderer::RendererError> for EngineError {
     }
 }
 
+impl From<std::str::Utf8Error> for EngineError {
+    fn from(err: std::str::Utf8Error) -> Self {
+        EngineError::Utf8(err)
+    }
+}
+
+impl From<std::string::FromUtf8Error> for EngineError {
+    fn from(err: std::string::FromUtf8Error) -> Self {
+        EngineError::FromUtf8(err)
+    }
+}
+
 impl fmt::Display for EngineError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             EngineError::Library(e) => write!(f, "Library loading error: {}", e),
             EngineError::Io(e) => write!(f, "I/O error: {}", e),
             EngineError::Renderer(e) => write!(f, "Renderer error: {}", e),
+            EngineError::Utf8(e) => write!(f, "UTF-8 decoding error: {}", e),
+            EngineError::FromUtf8(e) => write!(f, "UTF-8 conversion error: {}", e),
             EngineError::EngineInitFailure => write!(f, "The engine failed to start."),
             EngineError::TargetInitFailure => write!(f, "Could not find the target file."),
         }
@@ -47,6 +63,8 @@ impl std::error::Error for EngineError {
             EngineError::Library(e) => Some(e),
             EngineError::Io(e) => Some(e),
             EngineError::Renderer(e) => Some(e),
+            EngineError::Utf8(e) => Some(e),
+            EngineError::FromUtf8(e) => Some(e),
             _ => None,
         }
     }

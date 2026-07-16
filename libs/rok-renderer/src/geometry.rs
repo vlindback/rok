@@ -6,7 +6,7 @@ use rok_math::{vec2::Vec2, vec3::Vec3};
 
 /// 24-vertex unit cube: 4 verts per face so each can carry its own UV,
 /// normal, and tangent. Wound CCW-outward.
-pub(crate) fn cube() -> ([Vertex; 24], [u16; 36]) {
+pub fn cube() -> ([Vertex; 24], [u16; 36]) {
     let h = 0.5;
     let vertices = [
         Vertex {

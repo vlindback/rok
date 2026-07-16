@@ -13,13 +13,16 @@
 use std::num::NonZeroU32;
 
 use ash::vk;
+use rok_mesh::{MeshData, MeshVertex};
 
 use crate::backend::frame_descriptor::FrameDescriptor;
 use crate::backend::frame_ubo::{FrameUbo, FrameUboBuffer};
 use crate::backend::light::{GpuLight, LightsUbo, MAX_LIGHTS};
 use crate::backend::material::{MapImage, Material};
+use crate::backend::mesh_registry::MeshRegistry;
 use crate::backend::push_constants::PushConstants;
 use crate::error::{RendererError, RendererResult};
+use crate::mesh_handle::MeshHandle;
 use crate::{backend, geometry};
 use backend::device::VulkanDevice;
 use backend::frame::FrameSync;
@@ -81,7 +84,7 @@ pub struct RendererConfig {
 
 /// The renderer. Owns all Vulkan state.
 ///
-/// Drop order matters — Rust drops fields in declaration order.
+/// Drop order matters! Rust drops fields in declaration order.
 /// Frame sync and swapchain must be destroyed before device;
 /// device before surface; surface before instance.
 pub struct Renderer {
@@ -92,11 +95,10 @@ pub struct Renderer {
     frame_descriptor: Option<FrameDescriptor>,
     swapchain: Option<VulkanSwapchain>,
     pipeline: Option<GraphicsPipeline>,
-    vertex_buffer: Option<Buffer>,
-    index_buffer: Option<Buffer>,
     depth: Option<DepthImage>,
     material: Option<Material>,
     light_buffer: Option<Buffer>,
+    mesh_registry: Option<MeshRegistry>,
 
     // Device
     device: VulkanDevice,
@@ -190,38 +192,30 @@ impl Renderer {
             swapchain.is_some(),
         )?;
 
-        let (
-            depth,
-            material,
-            light_buffer,
-            frame_descriptor,
-            vertex_buffer,
-            index_buffer,
-            pipeline,
-        ) = if let Some(sc) = &swapchain {
-            let depth =
-                DepthImage::new(device.handle(), &mem_props, sc.config.extent, DEPTH_FORMAT)?;
-            let material = create_material(&device, &mem_props)?;
-            let light_buffer = create_lights(&device, &mem_props)?;
-            let frame_descriptor =
-                FrameDescriptor::new(device.handle(), &frame_ubos, light_buffer.buffer)?;
-            let (vb, ib) = create_geometry_buffers(&device, &mem_props)?;
+        let (depth, material, light_buffer, frame_descriptor, pipeline, mesh_registry) =
+            if let Some(sc) = &swapchain {
+                let depth =
+                    DepthImage::new(device.handle(), &mem_props, sc.config.extent, DEPTH_FORMAT)?;
+                let material = create_material(&device, &mem_props)?;
+                let light_buffer = create_lights(&device, &mem_props)?;
+                let frame_descriptor =
+                    FrameDescriptor::new(device.handle(), &frame_ubos, light_buffer.buffer)?;
 
-            let set_layouts = [material.layout(), frame_descriptor.layout()];
-            let pipeline = create_pipeline(&device, sc.config.format.format, &set_layouts)?;
+                let mut mesh_registry = MeshRegistry::new();
+                let set_layouts = [material.layout(), frame_descriptor.layout()];
+                let pipeline = create_pipeline(&device, sc.config.format.format, &set_layouts)?;
 
-            (
-                Some(depth),
-                Some(material),
-                Some(light_buffer),
-                Some(frame_descriptor),
-                Some(vb),
-                Some(ib),
-                Some(pipeline),
-            )
-        } else {
-            (None, None, None, None, None, None, None)
-        };
+                (
+                    Some(depth),
+                    Some(material),
+                    Some(light_buffer),
+                    Some(frame_descriptor),
+                    Some(pipeline),
+                    Some(mesh_registry),
+                )
+            } else {
+                (None, None, None, None, None, None)
+            };
 
         log_info!("rok-renderer: initialization complete");
 
@@ -231,10 +225,9 @@ impl Renderer {
             frame_descriptor,
             swapchain,
             pipeline,
-            vertex_buffer,
-            index_buffer,
             material,
             light_buffer,
+            mesh_registry,
             depth,
             device,
             physical_device: phys_device,
@@ -260,6 +253,22 @@ impl Renderer {
             self.vsync = vsync;
             self.needs_resize = true;
         }
+    }
+
+    pub fn register_mesh(&mut self, mesh_data: &MeshData) -> RendererResult<MeshHandle> {
+        let handle = self
+            .mesh_registry
+            .as_mut()
+            .expect("No mesh registry available.")
+            .upload(
+                self.device.handle(),
+                &self.mem_props,
+                self.device.queues.graphics,
+                self.device.queue_families.graphics,
+                &mesh_data,
+            );
+
+        handle
     }
 
     /// Render a frame.
@@ -308,8 +317,6 @@ impl Renderer {
         let pipeline = self.pipeline.as_ref();
         let material = self.material.as_ref();
         let frame_descriptor = self.frame_descriptor.as_ref();
-        let vertex_buffer = self.vertex_buffer.as_ref();
-        let index_buffer = self.index_buffer.as_ref();
 
         frame_sync.wait_for_current_frame(device);
         let frame = frame_sync.current();
@@ -364,22 +371,17 @@ impl Renderer {
             record_barriers_to_render(device, cmd, color_image, depth.image);
             begin_rendering(device, cmd, color_view, depth.view, extent);
 
-            if let (Some(gp), Some(mat), Some(fd), Some(vb), Some(ib)) = (
-                pipeline,
-                material,
-                frame_descriptor,
-                vertex_buffer,
-                index_buffer,
-            ) {
+            if let (Some(gp), Some(mat), Some(fd), Some(mr)) =
+                (pipeline, material, frame_descriptor, &self.mesh_registry)
+            {
                 record_draws(
                     device,
                     cmd,
                     gp,
                     mat.set,
                     fd.sets[frame_idx],
-                    vb,
-                    ib,
                     extent,
+                    mr,
                     commands,
                 );
             }
@@ -556,11 +558,8 @@ impl Drop for Renderer {
                 ubo.destroy(self.device.handle());
             }
 
-            if let Some(ref mut vb) = self.vertex_buffer {
-                vb.destroy(self.device.handle());
-            }
-            if let Some(ref mut ib) = self.index_buffer {
-                ib.destroy(self.device.handle());
+            if let Some(ref mut reg) = self.mesh_registry {
+                reg.destroy(self.device.handle());
             }
             if let Some(ref mut lb) = self.light_buffer {
                 lb.destroy(self.device.handle());
@@ -679,30 +678,6 @@ fn create_lights(
         std::slice::from_ref(&ubo),
         vk::BufferUsageFlags::UNIFORM_BUFFER,
     )
-}
-
-fn create_geometry_buffers(
-    device: &VulkanDevice,
-    mem_props: &vk::PhysicalDeviceMemoryProperties,
-) -> RendererResult<(Buffer, Buffer)> {
-    let (vertices, indices) = geometry::cube();
-    let vb = buffer::upload_via_staging(
-        device.handle(),
-        mem_props,
-        device.queues.graphics,
-        device.queue_families.graphics,
-        &vertices,
-        vk::BufferUsageFlags::VERTEX_BUFFER,
-    )?;
-    let ib = buffer::upload_via_staging(
-        device.handle(),
-        mem_props,
-        device.queues.graphics,
-        device.queue_families.graphics,
-        &indices,
-        vk::BufferUsageFlags::INDEX_BUFFER,
-    )?;
-    Ok((vb, ib))
 }
 
 fn create_pipeline(
@@ -848,9 +823,8 @@ unsafe fn record_draws(
     pipeline: &GraphicsPipeline,
     material_set: vk::DescriptorSet,
     frame_set: vk::DescriptorSet,
-    vertex_buffer: &Buffer,
-    index_buffer: &Buffer,
     extent: vk::Extent2D,
+    registry: &MeshRegistry,
     commands: &[RenderCommand],
 ) {
     // ... viewport/scissor, cmd_bind_pipeline, the two cmd_bind_descriptor_sets,
@@ -893,12 +867,12 @@ unsafe fn record_draws(
 
         device.cmd_set_viewport(cmd, 0, std::slice::from_ref(&viewport));
         device.cmd_set_scissor(cmd, 0, std::slice::from_ref(&scissor));
-        device.cmd_bind_vertex_buffers(cmd, 0, std::slice::from_ref(&vertex_buffer.buffer), &[0]);
-        device.cmd_bind_index_buffer(cmd, index_buffer.buffer, 0, vk::IndexType::UINT16);
 
         for &command in commands {
             match command {
-                RenderCommand::DrawMesh { model } => {
+                RenderCommand::DrawMesh { mesh, model } => {
+                    let gpu_mesh = registry.get(mesh);
+
                     let push = PushConstants {
                         model: model.to_cols_array(),
                     };
@@ -913,7 +887,22 @@ unsafe fn record_draws(
                         0,
                         push_bytes,
                     );
-                    device.cmd_draw_indexed(cmd, 36, 1, 0, 0, 0);
+
+                    device.cmd_bind_vertex_buffers(
+                        cmd,
+                        0,
+                        std::slice::from_ref(&gpu_mesh.vertex_buffer.buffer),
+                        &[0],
+                    );
+
+                    device.cmd_bind_index_buffer(
+                        cmd,
+                        gpu_mesh.index_buffer.buffer,
+                        0,
+                        gpu_mesh.index_type,
+                    );
+
+                    device.cmd_draw_indexed(cmd, gpu_mesh.index_count, 1, 0, 0, 0);
                 }
             }
         }

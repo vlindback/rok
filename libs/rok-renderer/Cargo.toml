@@ -10,5 +10,6 @@ edition.workspace = true
 rok-abi.workspace = true
 rok-log.workspace = true
 rok-math.workspace = true
+rok-mesh.workspace = true
 ash.workspace = true
 png.workspace = true
