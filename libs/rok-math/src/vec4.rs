@@ -3,7 +3,7 @@
 // rok-math library
 //
 
-use crate::{Lerp, simd::F32x4};
+use crate::{Lerp, simd::F32x4, vec3::Vec3};
 
 use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
@@ -216,6 +216,13 @@ impl Vec4 {
     pub fn new(x: f32, y: f32, z: f32, w: f32) -> Self {
         Self {
             v: F32x4::new(x, y, z, w),
+        }
+    }
+
+    #[inline]
+    pub fn from_vec3(v3: Vec3, w: f32) -> Self {
+        Self {
+            v: F32x4::new(v3.x(), v3.y(), v3.z(), w),
         }
     }
 

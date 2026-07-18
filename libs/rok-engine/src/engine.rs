@@ -12,9 +12,14 @@ use crate::{
 use rok_abi::{EngineApi, NativeSurfaceHandle, engine_api::EngineHandle, input::ScanCode};
 use rok_log::log_info;
 use rok_math::{quaternion::Quat, vec3::Vec3};
-use rok_renderer::RenderCommand;
+use rok_mesh::{GltfLoader, MeshData, MeshVertex, ObjLoader};
 use rok_renderer::Renderer;
 use rok_renderer::RendererConfig;
+use rok_renderer::mesh_handle::MeshHandle;
+use rok_renderer::{RenderCommand, cube};
+
+//const SUZANNE_OBJ: &[u8] = include_bytes!("../assets/suzanne.obj");
+const DAMAGED_HELMET_GLB: &[u8] = include_bytes!("../assets/DamagedHelmet.glb");
 
 pub struct EngineConfig {
     pub target_path: String,
@@ -41,33 +46,14 @@ impl Engine {
             vsync: false, // TODO: load from config
         };
 
-        let renderer = Renderer::new(&renderer_config).map_err(EngineError::Renderer)?;
+        let mut renderer = Renderer::new(&renderer_config).map_err(EngineError::Renderer)?;
 
-        let mut scene = Scene::new();
-        //let n = 4; // 4x4x4 = 64 cubes
-        //let spacing = 2.0;
-        //let offset = (n as f32 - 1.0) * spacing * 0.5; // center the grid on the origin
-        // for x in 0..n {
-        //     for y in 0..n {
-        //         for z in 0..n {
-        //             scene.instances.push(Transform::from_position(Vec3::new(
-        //                 x as f32 * spacing - offset,
-        //                 y as f32 * spacing - offset,
-        //                 z as f32 * spacing - offset,
-        //             )));
-        //         }
-        //     }
-        // }
+        let glb_data = DAMAGED_HELMET_GLB;
+        let mut loader = GltfLoader::new();
+        let meshes = loader.load_glb(glb_data).expect("Error loading glb model");
+        let mesh_handle = renderer.register_mesh(&meshes[0])?;
 
-        // scene
-        //     .instances
-        //     .push(Transform::from_position(Vec3::new(0.0, 0.0, 0.0)));
-
-        scene.instances.push(Transform {
-            position: Vec3::new(0.0, 0.0, 0.0),
-            rotation: Quat::from_euler(0.6, 0.4, 0.0), // any non-axis-aligned tilt
-            scale: Vec3::new(1.0, 1.0, 1.0),
-        });
+        let scene = Scene::test_scene(mesh_handle);
 
         let mut engine = Box::new(Engine {
             renderer,
@@ -123,7 +109,8 @@ impl Engine {
         self.render_commands.clear();
         for instance in &self.scene.instances {
             self.render_commands.push(RenderCommand::DrawMesh {
-                model: instance.to_matrix(),
+                model: instance.transform.to_matrix(),
+                mesh: instance.mesh,
             });
         }
 
@@ -139,3 +126,26 @@ impl Engine {
         self.should_quit.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
+
+// fn cube_mesh_data() -> MeshData {
+//     let (vertex_data, index_data) = geometry::cube();
+
+//     let vertices: Vec<MeshVertex> = vertex_data
+//         .into_iter()
+//         .map(|mv| MeshVertex {
+//             position: mv.position,
+//             uv: mv.uv,
+//             normal: mv.normal,
+//             tangent: mv.tangent,
+//         })
+//         .collect();
+
+//     let indices: Vec<u32> = index_data.into_iter().map(|x| x as u32).collect();
+
+//     MeshData {
+//         vertices,
+//         indices,
+//         material_name: String::from("default"),
+//         index_type: rok_mesh::IndexType::U16,
+//     }
+// }

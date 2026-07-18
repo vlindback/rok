@@ -7,6 +7,7 @@ pub mod frame;
 mod api;
 mod camera;
 mod input;
+mod instance;
 mod scene;
 mod target;
 mod transform;

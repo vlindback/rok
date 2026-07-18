@@ -1,0 +1,12 @@
+# rok-mesh Cargo.toml
+
+[package]
+name = "rok-mesh"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+
+[dependencies]
+rok-math.workspace = true
+serde = { workspace = true }
+serde_json = { workspace = true }
