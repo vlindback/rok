@@ -13,7 +13,7 @@
 use std::num::NonZeroU32;
 
 use ash::vk;
-use rok_mesh::{MeshData, MeshVertex};
+use rok_mesh::MeshData;
 
 use crate::backend::frame_descriptor::FrameDescriptor;
 use crate::backend::frame_ubo::{FrameUbo, FrameUboBuffer};

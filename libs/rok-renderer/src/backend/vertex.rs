@@ -1,7 +1,7 @@
 // vertex.rs
 
 use ash::vk;
-use rok_math::{vec2::Vec2, vec3::Vec3};
+use rok_math::{vec2::Vec2, vec3::Vec3, vec4::Vec4};
 
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -9,7 +9,7 @@ pub(crate) struct Vertex {
     pub position: Vec3,
     pub uv: Vec2,
     pub normal: Vec3,
-    pub tangent: Vec3,
+    pub tangent: Vec4,
 }
 
 impl Vertex {
@@ -40,7 +40,7 @@ impl Vertex {
             vk::VertexInputAttributeDescription::default()
                 .binding(0)
                 .location(3)
-                .format(vk::Format::R32G32B32_SFLOAT)
+                .format(vk::Format::R32G32B32A32_SFLOAT)
                 .offset(std::mem::offset_of!(Vertex, tangent) as u32),
         ]
     }

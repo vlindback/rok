@@ -6,11 +6,11 @@
 pub(crate) mod mesh;
 
 // loaders
+mod gltf_loader;
+mod gltf_schema;
 mod obj_loader;
 
 // re-export
+pub use gltf_loader::GltfLoader;
 pub use mesh::{IndexType, MeshData, MeshVertex};
 pub use obj_loader::ObjLoader;
-
-// debug todo remove
-pub use mesh::debug_dump_mesh_data_to_file;

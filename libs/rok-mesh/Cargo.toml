@@ -8,3 +8,5 @@ edition.workspace = true
 
 [dependencies]
 rok-math.workspace = true
+serde = { workspace = true }
+serde_json = { workspace = true }

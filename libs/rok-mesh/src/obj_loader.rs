@@ -1,7 +1,7 @@
 // obj_loader.rs
 //
 
-use rok_math::{vec2::Vec2, vec3::Vec3};
+use rok_math::{vec2::Vec2, vec3::Vec3, vec4::Vec4};
 
 use crate::mesh::{IndexType, MeshData, MeshVertex};
 
@@ -298,7 +298,7 @@ impl ObjModel {
                         position: Vec3::new(v.pos[0], v.pos[1], v.pos[2]),
                         uv: Vec2::new(v.uv[0], v.uv[1]),
                         normal: Vec3::new(v.norm[0], v.norm[1], v.norm[2]),
-                        tangent: Vec3::new(0.0, 0.0, 0.0), // filled below
+                        tangent: Vec4::zero(), // filled below
                     });
                     new
                 });
@@ -361,10 +361,11 @@ fn generate_tangents(vertices: &mut [MeshVertex], indices: &[u8], index_byte_wid
             continue;
         }
         let r = 1.0 / denom;
-        let tangent = Vec3::new(
+        let tangent = Vec4::new(
             r * (dv2 * e1.x() - dv1 * e2.x()),
             r * (dv2 * e1.y() - dv1 * e2.y()),
             r * (dv2 * e1.z() - dv1 * e2.z()),
+            0.,
         );
 
         vertices[i0].tangent = vertices[i0].tangent + tangent;
@@ -374,13 +375,13 @@ fn generate_tangents(vertices: &mut [MeshVertex], indices: &[u8], index_byte_wid
 
     // Second pass: orthonormalize against the normal.
     for v in vertices.iter_mut() {
-        let n = v.normal;
+        let n = Vec4::from_vec3(v.normal, 0.);
         let t = v.tangent - n * n.dot(v.tangent);
         let len = t.length();
         v.tangent = if len > 1e-6 {
             t * (1.0 / len)
         } else {
-            Vec3::new(1.0, 0.0, 0.0)
+            Vec4::unit_x()
         };
     }
 }

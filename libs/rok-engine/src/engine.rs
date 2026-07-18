@@ -12,13 +12,14 @@ use crate::{
 use rok_abi::{EngineApi, NativeSurfaceHandle, engine_api::EngineHandle, input::ScanCode};
 use rok_log::log_info;
 use rok_math::{quaternion::Quat, vec3::Vec3};
-use rok_mesh::{MeshData, MeshVertex, ObjLoader};
+use rok_mesh::{GltfLoader, MeshData, MeshVertex, ObjLoader};
 use rok_renderer::Renderer;
 use rok_renderer::RendererConfig;
 use rok_renderer::mesh_handle::MeshHandle;
 use rok_renderer::{RenderCommand, cube};
 
-const SUZANNE_OBJ: &[u8] = include_bytes!("../assets/suzanne.obj");
+//const SUZANNE_OBJ: &[u8] = include_bytes!("../assets/suzanne.obj");
+const DAMAGED_HELMET_GLB: &[u8] = include_bytes!("../assets/DamagedHelmet.glb");
 
 pub struct EngineConfig {
     pub target_path: String,
@@ -47,13 +48,12 @@ impl Engine {
 
         let mut renderer = Renderer::new(&renderer_config).map_err(EngineError::Renderer)?;
 
-        let obj_text = std::str::from_utf8(SUZANNE_OBJ)?;
-        let mut loader = ObjLoader::default();
-        let model = loader.parse_data(obj_text).expect("Parsing error");
-        let meshes = model.to_mesh_data();
-        let suzanne_handle = renderer.register_mesh(&meshes[0])?;
+        let glb_data = DAMAGED_HELMET_GLB;
+        let mut loader = GltfLoader::new();
+        let meshes = loader.load_glb(glb_data).expect("Error loading glb model");
+        let mesh_handle = renderer.register_mesh(&meshes[0])?;
 
-        let scene = Scene::test_scene(suzanne_handle);
+        let scene = Scene::test_scene(mesh_handle);
 
         let mut engine = Box::new(Engine {
             renderer,
