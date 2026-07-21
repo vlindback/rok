@@ -3,10 +3,10 @@
 
 use std::default;
 
-use rok_math::vec3::Vec3;
-use rok_renderer::mesh_handle::MeshHandle;
+use rok_math::{mat4x4::Mat4x4, vec3::Vec3};
+use rok_renderer::{MaterialHandle, MeshHandle};
 
-use crate::instance::Instance;
+use crate::{instance::Instance, model_registry::ModelHandle, transform::Transform};
 
 pub struct Scene {
     pub(crate) instances: Vec<Instance>,
@@ -23,10 +23,9 @@ impl Scene {
         self.instances.push(instance);
     }
 
-    pub(crate) fn test_scene(test_model: MeshHandle) -> Self {
-        let mut scene = Self::default();
-        scene.add_instance(Instance::new(test_model, Vec3::zero()));
-        scene
+    pub fn spawn(&mut self, model: ModelHandle, world: Transform) {
+        let inst = Instance::new(model, world);
+        self.instances.push(inst);
     }
 }
 

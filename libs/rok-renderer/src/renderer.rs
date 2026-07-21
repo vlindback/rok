@@ -13,16 +13,17 @@
 use std::num::NonZeroU32;
 
 use ash::vk;
-use rok_mesh::MeshData;
+use rok_mesh::{ImageData, MaterialDesc, MeshData};
 
+use crate::MeshHandle;
 use crate::backend::frame_descriptor::FrameDescriptor;
 use crate::backend::frame_ubo::{FrameUbo, FrameUboBuffer};
 use crate::backend::light::{GpuLight, LightsUbo, MAX_LIGHTS};
-use crate::backend::material::{MapImage, Material};
+use crate::backend::material::{MapImage, Material, MaterialLayout};
+use crate::backend::material_registry::{MaterialHandle, MaterialRegistry};
 use crate::backend::mesh_registry::MeshRegistry;
 use crate::backend::push_constants::PushConstants;
 use crate::error::{RendererError, RendererResult};
-use crate::mesh_handle::MeshHandle;
 use crate::{backend, geometry};
 use backend::device::VulkanDevice;
 use backend::frame::FrameSync;
@@ -43,14 +44,24 @@ use rok_math::vec3::Vec3;
 
 pub use crate::command::RenderCommand;
 
-const QUAD_VERT_SPV: &[u8] = include_bytes!("../shaders/quad.vert.spv");
-const QUAD_FRAG_SPV: &[u8] = include_bytes!("../shaders/quad.frag.spv");
-const BRICK_ALBEDO_PNG: &[u8] = include_bytes!("../textures/brick_albedo.png");
-const BRICK_NORMAL_PNG: &[u8] = include_bytes!("../textures/brick_normal.png");
-const BRICK_ROUGHNESS_PNG: &[u8] = include_bytes!("../textures/brick_roughness.png");
+const FORWARD_VERT_SPV: &[u8] = include_bytes!("../shaders/forward.vert.spv");
+const FORWARD_FRAG_SPV: &[u8] = include_bytes!("../shaders/forward.frag.spv");
 
 const DEPTH_FORMAT: vk::Format = vk::Format::D32_SFLOAT; // universal for depth attachment; a
 // production path would query support
+
+pub struct MaterialCreateInfo<'a> {
+    pub albedo: Option<MapImage<'a>>,
+    pub normal: Option<MapImage<'a>>,
+    pub metallic_roughness: Option<MapImage<'a>>,
+    pub emissive: Option<MapImage<'a>>,
+    pub base_color_factor: [f32; 4],
+    pub emissive_factor: [f32; 3],
+    pub metallic_factor: f32,
+    pub roughness_factor: f32,
+    pub normal_scale: f32,
+    pub occlusion_strength: f32,
+}
 
 // ---------------------------------------------------------------------------
 // RendererConfig
@@ -96,7 +107,8 @@ pub struct Renderer {
     swapchain: Option<VulkanSwapchain>,
     pipeline: Option<GraphicsPipeline>,
     depth: Option<DepthImage>,
-    material: Option<Material>,
+    material_layout: Option<MaterialLayout>,
+    material_registry: Option<MaterialRegistry>,
     light_buffer: Option<Buffer>,
     mesh_registry: Option<MeshRegistry>,
 
@@ -114,7 +126,7 @@ pub struct Renderer {
 
 impl Renderer {
     /// Create and initialise the renderer.
-    pub fn new(config: &RendererConfig) -> RendererResult<Self> {
+    pub fn from_config(config: &RendererConfig) -> RendererResult<Self> {
         // --- Core Vulkan objects
         let required_extensions = surface_extensions(config.surface.as_ref())?;
         let ext_refs: Vec<&std::ffi::CStr> = required_extensions.iter().copied().collect();
@@ -192,30 +204,39 @@ impl Renderer {
             swapchain.is_some(),
         )?;
 
-        let (depth, material, light_buffer, frame_descriptor, pipeline, mesh_registry) =
-            if let Some(sc) = &swapchain {
-                let depth =
-                    DepthImage::new(device.handle(), &mem_props, sc.config.extent, DEPTH_FORMAT)?;
-                let material = create_material(&device, &mem_props)?;
-                let light_buffer = create_lights(&device, &mem_props)?;
-                let frame_descriptor =
-                    FrameDescriptor::new(device.handle(), &frame_ubos, light_buffer.buffer)?;
+        let (
+            depth,
+            light_buffer,
+            frame_descriptor,
+            pipeline,
+            mesh_registry,
+            material_layout,
+            material_registry,
+        ) = if let Some(sc) = &swapchain {
+            let depth =
+                DepthImage::new(device.handle(), &mem_props, sc.config.extent, DEPTH_FORMAT)?;
+            let light_buffer = create_lights(&device, &mem_props)?;
+            let frame_descriptor =
+                FrameDescriptor::new(device.handle(), &frame_ubos, light_buffer.buffer)?;
 
-                let mut mesh_registry = MeshRegistry::new();
-                let set_layouts = [material.layout(), frame_descriptor.layout()];
-                let pipeline = create_pipeline(&device, sc.config.format.format, &set_layouts)?;
+            let mesh_registry = MeshRegistry::new();
+            let material_registry = MaterialRegistry::new();
+            let material_layout = MaterialLayout::new(device.handle())?;
+            let set_layouts = [material_layout.handle(), frame_descriptor.layout()];
+            let pipeline = create_pipeline(&device, sc.config.format.format, &set_layouts)?;
 
-                (
-                    Some(depth),
-                    Some(material),
-                    Some(light_buffer),
-                    Some(frame_descriptor),
-                    Some(pipeline),
-                    Some(mesh_registry),
-                )
-            } else {
-                (None, None, None, None, None, None)
-            };
+            (
+                Some(depth),
+                Some(light_buffer),
+                Some(frame_descriptor),
+                Some(pipeline),
+                Some(mesh_registry),
+                Some(material_layout),
+                Some(material_registry),
+            )
+        } else {
+            (None, None, None, None, None, None, None)
+        };
 
         log_info!("rok-renderer: initialization complete");
 
@@ -225,7 +246,8 @@ impl Renderer {
             frame_descriptor,
             swapchain,
             pipeline,
-            material,
+            material_layout,
+            material_registry,
             light_buffer,
             mesh_registry,
             depth,
@@ -315,7 +337,6 @@ impl Renderer {
         let depth = unsafe { self.depth.as_ref().unwrap_unchecked() };
         let device = self.device.handle();
         let pipeline = self.pipeline.as_ref();
-        let material = self.material.as_ref();
         let frame_descriptor = self.frame_descriptor.as_ref();
 
         frame_sync.wait_for_current_frame(device);
@@ -371,17 +392,20 @@ impl Renderer {
             record_barriers_to_render(device, cmd, color_image, depth.image);
             begin_rendering(device, cmd, color_view, depth.view, extent);
 
-            if let (Some(gp), Some(mat), Some(fd), Some(mr)) =
-                (pipeline, material, frame_descriptor, &self.mesh_registry)
-            {
+            if let (Some(gp), Some(fd), Some(meshes), Some(materials)) = (
+                pipeline,
+                frame_descriptor,
+                &self.mesh_registry,
+                &self.material_registry,
+            ) {
                 record_draws(
                     device,
                     cmd,
                     gp,
-                    mat.set,
                     fd.sets[frame_idx],
                     extent,
-                    mr,
+                    meshes,
+                    materials,
                     commands,
                 );
             }
@@ -459,6 +483,36 @@ impl Renderer {
 
         frame_sync.advance();
         true
+    }
+
+    /// Creates a material.
+    pub fn create_material(&mut self, info: MaterialCreateInfo) -> RendererResult<MaterialHandle> {
+        let layout = self
+            .material_layout
+            .as_ref()
+            .ok_or(RendererError::Config("no material layout (headless)"))?;
+        let material = Material::new(
+            self.device.handle(),
+            &self.mem_props,
+            self.device.queues.graphics,
+            self.device.queue_families.graphics,
+            layout,
+            info.albedo,
+            info.normal,
+            info.metallic_roughness,
+            info.emissive,
+            info.base_color_factor,
+            info.emissive_factor,
+            info.metallic_factor,
+            info.roughness_factor,
+            info.normal_scale,
+            info.occlusion_strength,
+        )?;
+        Ok(self
+            .material_registry
+            .as_mut()
+            .ok_or(RendererError::Config("no material registry (headless)"))?
+            .add(material))
     }
 
     /// Recreate the swapchain after a resize or present mode change.
@@ -547,8 +601,6 @@ impl Drop for Renderer {
     fn drop(&mut self) {
         self.device.wait_idle();
 
-        // TODO: this shouldnt be manual like this.
-
         unsafe {
             if let Some(ref mut fd) = self.frame_descriptor {
                 fd.destroy(self.device.handle());
@@ -565,8 +617,12 @@ impl Drop for Renderer {
                 lb.destroy(self.device.handle());
             }
 
-            if let Some(ref mut material) = self.material {
-                material.destroy(self.device.handle());
+            if let Some(ref mut mr) = self.material_registry {
+                mr.destroy(self.device.handle());
+            }
+
+            if let Some(ref mut layout) = self.material_layout {
+                layout.destroy(self.device.handle());
             }
 
             if let Some(ref mut depth) = self.depth {
@@ -627,36 +683,6 @@ fn create_frame_resources(
     Ok((Some(frame_sync), frame_ubos))
 }
 
-fn create_material(
-    device: &VulkanDevice,
-    mem_props: &vk::PhysicalDeviceMemoryProperties,
-) -> RendererResult<Material> {
-    let (aw, ah, apix) = decode_png(BRICK_ALBEDO_PNG)?;
-    let (nw, nh, npix) = decode_png(BRICK_NORMAL_PNG)?;
-    let (rw, rh, rpix) = decode_png(BRICK_ROUGHNESS_PNG)?;
-    Material::new(
-        device.handle(),
-        mem_props,
-        device.queues.graphics,
-        device.queue_families.graphics,
-        Some(MapImage {
-            width: aw,
-            height: ah,
-            pixels: &apix,
-        }),
-        Some(MapImage {
-            width: nw,
-            height: nh,
-            pixels: &npix,
-        }),
-        Some(MapImage {
-            width: rw,
-            height: rh,
-            pixels: &rpix,
-        }),
-    )
-}
-
 /// TODO: hardcoded scene lighting, moves to the scene/engine layer.
 fn create_lights(
     device: &VulkanDevice,
@@ -693,8 +719,8 @@ fn create_pipeline(
         .size(std::mem::size_of::<PushConstants>() as u32);
 
     let desc = PipelineDesc {
-        vertex_spv: QUAD_VERT_SPV,
-        fragment_spv: QUAD_FRAG_SPV,
+        vertex_spv: FORWARD_VERT_SPV,
+        fragment_spv: FORWARD_FRAG_SPV,
         color_format,
         topology: vk::PrimitiveTopology::TRIANGLE_LIST,
         polygon_mode: vk::PolygonMode::FILL,
@@ -821,10 +847,10 @@ unsafe fn record_draws(
     device: &ash::Device,
     cmd: vk::CommandBuffer,
     pipeline: &GraphicsPipeline,
-    material_set: vk::DescriptorSet,
     frame_set: vk::DescriptorSet,
     extent: vk::Extent2D,
-    registry: &MeshRegistry,
+    meshes: &MeshRegistry,
+    materials: &MaterialRegistry,
     commands: &[RenderCommand],
 ) {
     // ... viewport/scissor, cmd_bind_pipeline, the two cmd_bind_descriptor_sets,
@@ -845,16 +871,6 @@ unsafe fn record_draws(
     unsafe {
         device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, pipeline.pipeline);
 
-        // set 0: material/texture/light
-        device.cmd_bind_descriptor_sets(
-            cmd,
-            vk::PipelineBindPoint::GRAPHICS,
-            pipeline.layout,
-            0,
-            std::slice::from_ref(&material_set),
-            &[],
-        );
-
         // set 1: this frame's per-frame data
         device.cmd_bind_descriptor_sets(
             cmd,
@@ -870,8 +886,24 @@ unsafe fn record_draws(
 
         for &command in commands {
             match command {
-                RenderCommand::DrawMesh { mesh, model } => {
-                    let gpu_mesh = registry.get(mesh);
+                RenderCommand::DrawMesh {
+                    mesh,
+                    material,
+                    model,
+                } => {
+                    let gpu_mesh = meshes.get(mesh);
+
+                    let mat = materials.get(material);
+
+                    // set 0: material/texture/light
+                    device.cmd_bind_descriptor_sets(
+                        cmd,
+                        vk::PipelineBindPoint::GRAPHICS,
+                        pipeline.layout,
+                        0,
+                        std::slice::from_ref(&mat.set),
+                        &[],
+                    );
 
                     let push = PushConstants {
                         model: model.to_cols_array(),
@@ -938,33 +970,4 @@ unsafe fn record_barrier_to_present(
     unsafe {
         device.cmd_pipeline_barrier2(cmd, &dep_info);
     }
-}
-
-// ---------------------------------------------------------------------------
-// Private utility functions
-// ---------------------------------------------------------------------------
-
-fn decode_png(bytes: &[u8]) -> RendererResult<(u32, u32, Vec<u8>)> {
-    let decoder = png::Decoder::new(std::io::Cursor::new(bytes));
-    let mut reader = decoder
-        .read_info()
-        .map_err(|_| RendererError::Config("png read_info"))?;
-    let mut buf = vec![0u8; reader.output_buffer_size()];
-    let frame = reader
-        .next_frame(&mut buf)
-        .map_err(|_| RendererError::Config("png decode"))?;
-    buf.truncate(frame.buffer_size());
-    let (w, h) = (frame.width as usize, frame.height as usize);
-    let channels = buf.len() / (w * h);
-    // Expand to RGBA regardless of source (RGB albedo/normal, grayscale roughness).
-    let rgba = match channels {
-        4 => buf,
-        3 => buf
-            .chunks_exact(3)
-            .flat_map(|p| [p[0], p[1], p[2], 255])
-            .collect(),
-        1 => buf.iter().flat_map(|&g| [g, g, g, 255]).collect(),
-        _ => return Err(RendererError::Config("unsupported png channel count")),
-    };
-    Ok((frame.width, frame.height, rgba))
 }

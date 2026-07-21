@@ -1,21 +1,15 @@
 // instance.rs
 //
 
-use rok_math::vec3::Vec3;
-use rok_renderer::mesh_handle::MeshHandle;
-
-use crate::transform::Transform;
+use crate::{model_registry::ModelHandle, transform::Transform};
 
 pub(crate) struct Instance {
     pub(crate) transform: Transform,
-    pub(crate) mesh: MeshHandle,
+    pub(crate) model: ModelHandle,
 }
 
 impl Instance {
-    pub(crate) fn new(mesh: MeshHandle, pos: Vec3) -> Self {
-        Self {
-            transform: Transform::from_position(pos),
-            mesh,
-        }
+    pub(crate) fn new(model: ModelHandle, transform: Transform) -> Self {
+        Self { transform, model }
     }
 }

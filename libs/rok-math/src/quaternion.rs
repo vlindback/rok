@@ -71,6 +71,15 @@ impl Quat {
         qy * qx * qz
     }
 
+    pub fn from_array(a: &[f32; 4]) -> Self {
+        Self {
+            x: a[0],
+            y: a[1],
+            z: a[2],
+            w: a[3],
+        }
+    }
+
     #[inline]
     pub fn x(&self) -> f32 {
         self.x

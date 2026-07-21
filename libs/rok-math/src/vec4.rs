@@ -5,7 +5,10 @@
 
 use crate::{Lerp, simd::F32x4, vec3::Vec3};
 
-use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
+use std::{
+    mem::MaybeUninit,
+    ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign},
+};
 
 #[derive(Debug, Copy, Clone)]
 pub struct Vec4 {
@@ -423,6 +426,19 @@ impl Vec4 {
     #[inline]
     pub fn project_onto_normalized(self, onto: Self) -> Self {
         onto * self.dot(onto)
+    }
+
+    // Convert to Vec3
+    #[inline]
+    pub fn xyz(&self) -> Vec3 {
+        let mut arr = MaybeUninit::<[f32; 4]>::uninit();
+
+        // Safety: we create four f32s and fill them in with v.store
+        unsafe {
+            self.v.store(&mut *arr.as_mut_ptr());
+            let initialized_arr = arr.assume_init();
+            Vec3::new(initialized_arr[0], initialized_arr[1], initialized_arr[2])
+        }
     }
 
     // crate-private

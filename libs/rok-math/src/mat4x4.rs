@@ -3,6 +3,7 @@
 // rok-math library
 //
 
+use crate::quaternion::Quat;
 use crate::simd::{F32x4, shuffle_mask};
 use crate::vec3::Vec3;
 use crate::vec4::Vec4;
@@ -31,6 +32,11 @@ impl Mat4x4 {
                 F32x4::new(0., 0., 0., 1.),
             ],
         }
+    }
+
+    #[inline]
+    pub fn identity() -> Self {
+        Self::new()
     }
 
     pub fn zero() -> Self {
@@ -147,6 +153,49 @@ impl Mat4x4 {
                 F32x4::new(m[4], m[5], m[6], m[7]),
                 F32x4::new(m[8], m[9], m[10], m[11]),
                 F32x4::new(m[12], m[13], m[14], m[15]),
+            ],
+        }
+    }
+
+    /// Creates a Mat4x4 from a Translation, Rotation (Quaternion), and Scale.
+    /// This is significantly faster than multiplying T * R * S matrices.
+    pub fn from_trs(translation: Vec3, rotation: Quat, scale: Vec3) -> Self {
+        let x = rotation.x();
+        let y = rotation.y();
+        let z = rotation.z();
+        let w = rotation.w();
+
+        // Pre-compute to avoid redundant multiplications
+        let x2 = x + x;
+        let y2 = y + y;
+        let z2 = z + z;
+
+        let xx = x * x2;
+        let xy = x * y2;
+        let xz = x * z2;
+
+        let yy = y * y2;
+        let yz = y * z2;
+        let zz = z * z2;
+
+        let wx = w * x2;
+        let wy = w * y2;
+        let wz = w * z2;
+
+        let sx = scale.x();
+        let sy = scale.y();
+        let sz = scale.z();
+
+        Self {
+            cols: [
+                // Column 0
+                F32x4::new((1.0 - (yy + zz)) * sx, (xy + wz) * sx, (xz - wy) * sx, 0.0),
+                // Column 1
+                F32x4::new((xy - wz) * sy, (1.0 - (xx + zz)) * sy, (yz + wx) * sy, 0.0),
+                // Column 2
+                F32x4::new((xz + wy) * sz, (yz - wx) * sz, (1.0 - (xx + yy)) * sz, 0.0),
+                // Column 3 (Translation)
+                F32x4::new(translation.x(), translation.y(), translation.z(), 1.0),
             ],
         }
     }

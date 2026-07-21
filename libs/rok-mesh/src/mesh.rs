@@ -22,6 +22,7 @@ pub struct MeshData {
     /// Either u16 or u32 depending on the index_type field.
     pub indices: Vec<u8>,
     /// Which material this sub-mesh referenced (by name, resolved later).
-    pub material_name: String,
+    pub material_index: Option<usize>,
+    pub material_name: Option<String>,
     pub index_type: IndexType,
 }

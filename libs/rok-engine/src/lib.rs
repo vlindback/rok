@@ -8,6 +8,8 @@ mod api;
 mod camera;
 mod input;
 mod instance;
+mod model;
+mod model_registry;
 mod scene;
 mod target;
 mod transform;

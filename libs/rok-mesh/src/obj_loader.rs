@@ -94,13 +94,19 @@ impl ObjLoader {
 
     /// Parses an obj file blob.
     ///
-    /// NOTE: .obj files are encoded in 7 bit ascii by convention.
-    /// This is compatible with UTF8 which is what Rust uses natively.
-    pub fn parse_data(&mut self, data: &str) -> Option<ObjModel> {
+    /// .obj is 7-bit ASCII by convention, a subset of UTF-8. We take bytes (matching
+    /// the glTF loader and what the asset layer will feed us) and validate to UTF-8
+    /// here. A malformed file errors cleanly rather than being assumed valid.
+    pub fn parse_data(&mut self, data: &[u8]) -> Option<ObjModel> {
         // obj has three lists. Positions, normals and uv.
         // We parse these from the file then build a vertex buffer
         // then generate an index buffer from them.
         //
+
+        let data = match std::str::from_utf8(data) {
+            Ok(s) => s,
+            Err(_) => return None, // not valid UTF-8 → not a parseable OBJ
+        };
 
         // clear cache first
         self.reset();
@@ -167,7 +173,7 @@ impl ObjLoader {
                         self.current_face.push(gpu_index);
 
                         // Check the index type, if it's > u16 max, bump the index type to u32
-                        if index_type != IndexType::U32 && gpu_index > u32::MAX {
+                        if index_type == IndexType::U16 && gpu_index > u16::MAX as u32 {
                             index_type = IndexType::U32;
                         }
                     }
@@ -321,7 +327,8 @@ impl ObjModel {
             out.push(MeshData {
                 vertices,
                 indices,
-                material_name: sub.material_name.clone(),
+                material_name: Some(sub.material_name.clone()),
+                material_index: None,
                 index_type,
             });
         }

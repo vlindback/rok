@@ -4,6 +4,9 @@
 
 use std::{num::NonZeroU32, sync::atomic::AtomicBool};
 
+use crate::instance::Instance;
+use crate::model::{Model, default_material_info, material_create_info_from_desc};
+use crate::model_registry::{ModelHandle, ModelRegistry};
 use crate::scene::Scene;
 use crate::{
     api::build, camera::OrbitCamera, error::EngineError, frame::FrameInput, input::InputState,
@@ -12,13 +15,13 @@ use crate::{
 use rok_abi::{EngineApi, NativeSurfaceHandle, engine_api::EngineHandle, input::ScanCode};
 use rok_log::log_info;
 use rok_math::{quaternion::Quat, vec3::Vec3};
-use rok_mesh::{GltfLoader, MeshData, MeshVertex, ObjLoader};
-use rok_renderer::Renderer;
-use rok_renderer::RendererConfig;
-use rok_renderer::mesh_handle::MeshHandle;
+use rok_mesh::{GltfLoader, ImageData, MaterialDesc, MeshData, MeshVertex, ObjLoader};
+use rok_renderer::{MapImage, Renderer, RendererError};
+use rok_renderer::{MaterialCreateInfo, MeshHandle};
 use rok_renderer::{RenderCommand, cube};
+use rok_renderer::{RendererConfig, RendererResult};
 
-//const SUZANNE_OBJ: &[u8] = include_bytes!("../assets/suzanne.obj");
+const SUZANNE_OBJ: &[u8] = include_bytes!("../assets/suzanne.obj");
 const DAMAGED_HELMET_GLB: &[u8] = include_bytes!("../assets/DamagedHelmet.glb");
 
 pub struct EngineConfig {
@@ -33,8 +36,9 @@ pub struct Engine {
     input_state: InputState,
     should_quit: AtomicBool,
     camera: OrbitCamera,
-    scene: Scene,
+    pub scene: Scene,
     render_commands: Vec<RenderCommand>,
+    model_registry: ModelRegistry,
 }
 
 impl Engine {
@@ -46,14 +50,11 @@ impl Engine {
             vsync: false, // TODO: load from config
         };
 
-        let mut renderer = Renderer::new(&renderer_config).map_err(EngineError::Renderer)?;
+        let mut renderer =
+            Renderer::from_config(&renderer_config).map_err(EngineError::Renderer)?;
 
-        let glb_data = DAMAGED_HELMET_GLB;
-        let mut loader = GltfLoader::new();
-        let meshes = loader.load_glb(glb_data).expect("Error loading glb model");
-        let mesh_handle = renderer.register_mesh(&meshes[0])?;
-
-        let scene = Scene::test_scene(mesh_handle);
+        let helmet_model = load_gltf_model(DAMAGED_HELMET_GLB)?;
+        let suzanne_model = load_obj_model(SUZANNE_OBJ)?;
 
         let mut engine = Box::new(Engine {
             renderer,
@@ -62,9 +63,19 @@ impl Engine {
             input_state: InputState::new(),
             should_quit: AtomicBool::new(false),
             camera: OrbitCamera::new(),
-            scene,
+            scene: Scene::new(),
             render_commands: Vec::new(),
+            model_registry: ModelRegistry::new(),
         });
+
+        let suzanne = engine.register_model(&suzanne_model)?;
+        let helmet = engine.register_model(&helmet_model)?;
+
+        let helmet_transform = Transform::identity();
+        let suzanne_transform = Transform::from_position(Vec3::new(3.0, 0.0, 0.0));
+
+        engine.scene.spawn(suzanne, suzanne_transform);
+        engine.scene.spawn(helmet, helmet_transform);
 
         let handle = (&mut *engine as *mut Engine).cast::<EngineHandle>();
 
@@ -106,12 +117,18 @@ impl Engine {
     }
 
     pub fn render(&mut self) {
-        self.render_commands.clear();
+        let commands = &mut self.render_commands;
+
+        commands.clear();
         for instance in &self.scene.instances {
-            self.render_commands.push(RenderCommand::DrawMesh {
-                model: instance.transform.to_matrix(),
-                mesh: instance.mesh,
-            });
+            let registered = self.model_registry.get(instance.model);
+            for &(mesh, material) in &registered.parts {
+                commands.push(RenderCommand::DrawMesh {
+                    mesh,
+                    material,
+                    model: instance.transform.to_matrix(),
+                });
+            }
         }
 
         self.renderer
@@ -125,27 +142,55 @@ impl Engine {
     pub fn should_quit(&self) -> bool {
         self.should_quit.load(std::sync::atomic::Ordering::Relaxed)
     }
+
+    pub fn register_model(&mut self, model: &Model) -> RendererResult<ModelHandle> {
+        let mut parts = Vec::with_capacity(model.meshes.len());
+        for mesh in &model.meshes {
+            let mesh_handle = self.renderer.register_mesh(mesh)?;
+            let material_handle = match mesh.material_index.and_then(|i| model.materials.get(i)) {
+                Some(desc) => {
+                    let info = material_create_info_from_desc(desc); // borrows `desc` (from model)
+                    self.renderer.create_material(info)? // uploads, borrow ends here
+                }
+                None => {
+                    let info = default_material_info(); // 'static, no borrow
+                    self.renderer.create_material(info)?
+                }
+            };
+
+            parts.push((mesh_handle, material_handle));
+        }
+        Ok(self.model_registry.add(parts))
+    }
 }
 
-// fn cube_mesh_data() -> MeshData {
-//     let (vertex_data, index_data) = geometry::cube();
+// TODO: engine shouldnt do this
+fn load_obj_model(data: &[u8]) -> Result<Model, EngineError> {
+    let meshes = ObjLoader::new()
+        .parse_data(data)
+        .ok_or(EngineError::EngineInitFailure)?
+        .to_mesh_data();
+    // OBJ has no materials yet → empty. Each mesh's material_index is None,
+    // so register_model gives it the fallback. No material built here.
+    Ok(Model::from_data(meshes, Vec::new()))
+}
 
-//     let vertices: Vec<MeshVertex> = vertex_data
-//         .into_iter()
-//         .map(|mv| MeshVertex {
-//             position: mv.position,
-//             uv: mv.uv,
-//             normal: mv.normal,
-//             tangent: mv.tangent,
-//         })
-//         .collect();
+fn load_gltf_model(data: &[u8]) -> Result<Model, EngineError> {
+    let loaded = GltfLoader::new()
+        .load_glb(data)
+        .map_err(|err| EngineError::EngineInitFailure)?;
 
-//     let indices: Vec<u32> = index_data.into_iter().map(|x| x as u32).collect();
+    // load_glb gives LoadedGltfModel { meshes: Vec<LoadedGltfMesh>, materials: Vec<MaterialDesc> }.
+    // Model wants Vec<MeshData> — unwrap each LoadedGltfMesh to its baked MeshData.
+    let meshes = loaded.meshes.into_iter().map(|m| m.data).collect();
 
-//     MeshData {
-//         vertices,
-//         indices,
-//         material_name: String::from("default"),
-//         index_type: rok_mesh::IndexType::U16,
-//     }
-// }
+    Ok(Model::from_data(meshes, loaded.materials))
+}
+// TODO: move later
+fn image_data_to_map_image(image_data: &Option<ImageData>) -> Option<MapImage<'_>> {
+    image_data.as_ref().map(|data| MapImage {
+        width: data.width,
+        height: data.height,
+        pixels: &data.rgba8,
+    })
+}

@@ -3,12 +3,14 @@
 use crate::{
     RendererResult,
     backend::buffer::{self, Buffer},
-    mesh_handle::MeshHandle,
 };
 
 use ash::vk;
 
 use rok_mesh::{MeshData, MeshVertex};
+
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+pub struct MeshHandle(pub u32); // index into the mesh registry
 
 pub struct GpuMesh {
     pub vertex_buffer: Buffer,

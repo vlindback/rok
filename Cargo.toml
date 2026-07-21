@@ -15,13 +15,17 @@ members = [
 ]
 resolver = "2"
 
-# --- Workspace Inheritance ---
+#
+# Workspace Inheritance
+#
 [workspace.package]
 version = "0.1.0"
 authors = ["Viktor Lindbäck"]
 edition = "2024"
 
-# --- Shared dependencies ---
+#
+# Shared dependencies
+#
 [workspace.dependencies]
 # Internal
 rok-abi = { path = "libs/rok-abi" }
@@ -34,14 +38,29 @@ rok-engine = { path = "libs/rok-engine" }
 rok-renderer = { path = "libs/rok-renderer" }
 rok-math = { path = "libs/rok-math" }
 rok-mesh = { path = "libs/rok-mesh" }
+
+#
 # External
+#
+
+# lockless queues, threading
 crossbeam = "0.8"
+# dll-dylib loading
 libloading = "0.8"
+# Vulkan wrapper bindings
 ash = "0.38.0"
+# PNG decoder
 png = "0.17"
+# JPG decoder
+zune-jpeg = "0.5"
+zune-core = "0.5"
+# JSON reader
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
+
+#
 # Platform
+#
 windows-sys = { version = "0.61.1", features = [
         "Win32_Foundation",
         "Win32_UI_WindowsAndMessaging",
@@ -55,6 +74,8 @@ windows-sys = { version = "0.61.1", features = [
         "Win32_Security",
 ] }
 
-# --- Profiles ---
+#
+# Profiles
+#
 [profile.dev.package."*"]
 opt-level = 3

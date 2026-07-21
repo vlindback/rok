@@ -1,12 +1,35 @@
 // gltf_loader.rs
 //
 
-use rok_math::{vec2::Vec2, vec3::Vec3, vec4::Vec4};
+use rok_math::{mat4x4::Mat4x4, quaternion::Quat, vec2::Vec2, vec3::Vec3, vec4::Vec4};
 
 use crate::{
     IndexType, MeshData, MeshVertex,
-    gltf_schema::{GltfDocument, Primitive},
+    gltf_schema::{GltfDocument, Material, Primitive},
+    image::{ImageData, decode_image},
 };
+
+pub struct MaterialDesc {
+    pub name: Option<String>,
+
+    pub base_color_factor: [f32; 4],
+    pub metallic_factor: f32,
+    pub roughness_factor: f32,
+    pub emissive_factor: [f32; 3],
+
+    pub base_color: Option<ImageData>,
+    pub metallic_roughness: Option<ImageData>,
+    pub normal: Option<ImageData>,
+    pub occlusion: Option<ImageData>,
+    pub emissive: Option<ImageData>,
+
+    pub normal_scale: f32,
+    pub occlusion_strength: f32,
+
+    pub alpha_mode: String,
+    pub alpha_cutoff: f32,
+    pub double_sided: bool,
+}
 
 pub(crate) struct GltfModel<'a> {
     pub document: GltfDocument,
@@ -75,6 +98,62 @@ impl<'a> GltfModel<'a> {
         })
     }
 
+    /// Resolve a texture reference (an index into document.textures) all the way
+    /// down to a decoded RGBA8 image.
+    fn load_texture(&self, texture_index: usize) -> Result<ImageData, String> {
+        let texture = self
+            .document
+            .textures
+            .get(texture_index)
+            .ok_or_else(|| format!("texture index {texture_index} out of range"))?;
+
+        // hop: texture to image
+        let source = texture.source.ok_or("texture has no image source")?;
+        let image = self
+            .document
+            .images
+            .get(source)
+            .ok_or_else(|| format!("image index {source} out of range"))?;
+
+        // hop: image to raw bytes. In a glb, images live in a bufferView (NOT an
+        // accessor. This is a raw byte range, no stride, no element decoding).
+        let bv_idx = image
+            .buffer_view
+            .ok_or("external-URI images unsupported (glb-embedded only)")?;
+        let bv = self
+            .document
+            .buffer_views
+            .get(bv_idx)
+            .ok_or_else(|| format!("bufferView {bv_idx} out of range"))?;
+        let bin = self
+            .bin
+            .ok_or("image needs bin data but glb has no BIN chunk")?;
+
+        let start = bv.byte_offset;
+        let end = start + bv.byte_length;
+        if end > bin.len() {
+            return Err(format!(
+                "image bufferView overruns bin: {end} > {}",
+                bin.len()
+            ));
+        }
+        let encoded = &bin[start..end]; // the raw PNG/JPEG bytes
+
+        decode_image(encoded, image.mime_type.as_deref()) // the codec boundary
+    }
+
+    fn read_vec4(&self, accessor_index: usize) -> Result<Vec<Vec4>, String> {
+        let reader = self.accessor_reader(accessor_index)?;
+        let vec4s: Vec<Vec4> = (0..reader.count)
+            .map(|n| {
+                let a = reader.read_f32s(n);
+                Vec4::new(a[0], a[1], a[2], a[3])
+            })
+            .collect();
+
+        Ok(vec4s)
+    }
+
     fn read_vec3(&self, accessor_index: usize) -> Result<Vec<Vec3>, String> {
         let reader = self.accessor_reader(accessor_index)?;
         let vec3s: Vec<Vec3> = (0..reader.count)
@@ -133,21 +212,18 @@ impl<'a> GltfModel<'a> {
             Some(&i) => self.read_vec2(i)?,
             None => vec![Vec2::new(0.0, 0.0); n], // same fallback OBJ uses
         };
-        let tangents = match prim.attributes.get("TANGENT") {
-            Some(&i) =>
-            /* NOTE: TANGENT is a VEC4 accessor, not VEC3 — see below */
-            {
-                todo!()
-            }
-            None => vec![Vec4::new(0.0, 0.0, 0.0, 0.0); n], // tangent generation is its own next piece
+        let tangents: Vec<Vec4> = match prim.attributes.get("TANGENT") {
+            Some(&i) => self.read_vec4(i)?,
+            None => vec![Vec4::new(0.0, 0.0, 0.0, 0.0); n],
         };
 
         // Cheap integrity guard - glTF promises these are equal.
-        if normals.len() != n || uvs.len() != n {
+        if normals.len() != n || uvs.len() != n || tangents.len() != n {
             return Err(format!(
-                "attribute count mismatch: pos {n}, nrm {}, uv {}",
+                "attribute count mismatch: pos {n}, nrm {}, uv {}, tan {}",
                 normals.len(),
-                uvs.len()
+                uvs.len(),
+                tangents.len()
             ));
         }
 
@@ -157,12 +233,12 @@ impl<'a> GltfModel<'a> {
             None => return Err("non-indexed primitives unsupported yet".into()),
         };
 
-        // material_name: temporary bridge - see note.
         let material_name = prim
             .material
             .and_then(|i| self.document.materials.get(i))
-            .and_then(|m| m.name.clone())
-            .unwrap_or_else(|| "gltf_default".to_string());
+            .and_then(|m| m.name.clone());
+
+        let material_index = prim.material;
 
         let mut vertices: Vec<MeshVertex> = Vec::with_capacity(n);
 
@@ -179,10 +255,87 @@ impl<'a> GltfModel<'a> {
         Ok(MeshData {
             vertices,
             indices,
+            material_index,
             material_name,
             index_type,
         })
     }
+
+    pub(crate) fn load_materials(&self) -> Result<Vec<MaterialDesc>, String> {
+        let mut loaded_materials = Vec::with_capacity(self.document.materials.len());
+
+        for mat in &self.document.materials {
+            // Unpack PBR values, falling back to spec defaults if the block is entirely absent
+            let (bc_factor, m_factor, r_factor, bc_tex, mr_tex) = match &mat.pbr_metallic_roughness
+            {
+                Some(pbr) => (
+                    pbr.base_color_factor,
+                    pbr.metallic_factor,
+                    pbr.roughness_factor,
+                    pbr.base_color_texture.as_ref(),
+                    pbr.metallic_roughness_texture.as_ref(),
+                ),
+                None => (
+                    [1.0, 1.0, 1.0, 1.0], // default_white
+                    1.0,                  // default_one
+                    1.0,                  // default_one
+                    None,
+                    None,
+                ),
+            };
+
+            let base_color = bc_tex.map(|t| self.load_texture(t.index)).transpose()?;
+            let metallic_roughness = mr_tex.map(|t| self.load_texture(t.index)).transpose()?;
+            let normal_scale = mat.normal_texture.as_ref().map_or(1.0, |t| t.scale);
+            let occlusion_strength = mat.occlusion_texture.as_ref().map_or(1.0, |t| t.strength);
+
+            let normal = mat
+                .normal_texture
+                .as_ref()
+                .map(|t| self.load_texture(t.index))
+                .transpose()?;
+            let occlusion = mat
+                .occlusion_texture
+                .as_ref()
+                .map(|t| self.load_texture(t.index))
+                .transpose()?;
+            let emissive = mat
+                .emissive_texture
+                .as_ref()
+                .map(|t| self.load_texture(t.index))
+                .transpose()?;
+
+            loaded_materials.push(MaterialDesc {
+                name: mat.name.clone(),
+                base_color_factor: bc_factor,
+                metallic_factor: m_factor,
+                roughness_factor: r_factor,
+                emissive_factor: mat.emissive_factor,
+                base_color,
+                metallic_roughness,
+                normal_scale: normal_scale,
+                occlusion_strength,
+                alpha_mode: mat.alpha_mode.clone(),
+                alpha_cutoff: mat.alpha_cutoff,
+                double_sided: mat.double_sided,
+                normal,
+                occlusion,
+                emissive,
+            });
+        }
+
+        Ok(loaded_materials)
+    }
+}
+
+pub struct LoadedGltfMesh {
+    pub data: MeshData,
+    //pub transform: Mat4x4,
+}
+
+pub struct LoadedGltfModel {
+    pub meshes: Vec<LoadedGltfMesh>,
+    pub materials: Vec<MaterialDesc>,
 }
 
 pub struct GltfLoader {}
@@ -192,21 +345,83 @@ impl GltfLoader {
         Self {}
     }
 
-    pub fn load_glb(&mut self, data: &[u8]) -> Result<Vec<MeshData>, String> {
+    pub fn load_glb(&mut self, data: &[u8]) -> Result<LoadedGltfModel, String> {
         let model = self.parse_glb(data)?;
 
-        let mut meshes = Vec::new();
-        for mesh in &model.document.meshes {
+        let materials = model.load_materials()?;
+
+        let mut loaded_meshes = Vec::new();
+
+        // Find the active scene (glTF files can have multiple, but usually specify a default)
+        let scene_index = model.document.scene.unwrap_or(0);
+        let scene = model
+            .document
+            .scenes
+            .get(scene_index)
+            .ok_or("Scene index out of bounds")?;
+
+        // Traverse the scene graph starting from the root nodes
+        for &node_idx in &scene.nodes {
+            self.process_scene_node(node_idx, &model, Mat4x4::new(), &mut loaded_meshes)?;
+        }
+
+        if loaded_meshes.is_empty() {
+            return Err("glTF contained no instantiated meshes in the scene".into());
+        }
+
+        Ok(LoadedGltfModel {
+            meshes: loaded_meshes,
+            materials,
+        })
+    }
+
+    fn process_scene_node(
+        &self,
+        node_index: usize,
+        model: &GltfModel,
+        parent_transform: Mat4x4,
+        out_meshes: &mut Vec<LoadedGltfMesh>,
+    ) -> Result<(), String> {
+        let node = model
+            .document
+            .nodes
+            .get(node_index)
+            .ok_or("Node index out of bounds")?;
+
+        // Calculate this node's local transformation
+        let local_transform = if let Some(matrix) = &node.matrix {
+            // The JSON provides a flat array of 16 floats in column-major order
+            Mat4x4::from_cols_slice(matrix)
+        } else {
+            // Otherwise, build it from TRS (Translation, Rotation, Scale)
+            // If any are missing, default to identity values.
+            let t = node.translation.unwrap_or([0.0, 0.0, 0.0]);
+            let r = node.rotation.unwrap_or([0.0, 0.0, 0.0, 1.0]); // Quaternion [x, y, z, w]
+            let s = node.scale.unwrap_or([1.0, 1.0, 1.0]);
+
+            Mat4x4::from_trs(Vec3::from(t), Quat::from_array(&r), s.into())
+        };
+
+        let global_transform = parent_transform * local_transform;
+
+        // If this node has a mesh, build it and attach the global transform
+        if let Some(mesh_idx) = node.mesh {
+            let mesh = &model.document.meshes[mesh_idx];
             for prim in &mesh.primitives {
-                meshes.push(model.build_primitive(prim)?);
+                let mut mesh_data = model.build_primitive(prim)?;
+                bake_transform(&mut mesh_data, &global_transform);
+                out_meshes.push(LoadedGltfMesh {
+                    data: mesh_data,
+                    //&transform: global_transform,
+                });
             }
         }
 
-        if meshes.is_empty() {
-            return Err("glTF contained no mesh primitives".into());
+        for &child_idx in &node.children {
+            self.process_scene_node(child_idx, model, global_transform, out_meshes)?;
         }
 
-        Ok(meshes)
+        Ok(())
     }
 
     fn parse_glb<'a>(&mut self, data: &'a [u8]) -> Result<GltfModel<'a>, String> {
@@ -419,6 +634,17 @@ fn component_count(kind: &str) -> Result<usize, String> {
         "MAT4" => 16,
         other => return Err(format!("Unknown accessor type '{other}'.")),
     })
+}
+
+/// The GLTF nodes exist in a hierarchy with a relative space matrix.
+/// We need to flatten this.
+fn bake_transform(mesh: &mut MeshData, m: &Mat4x4) {
+    for v in &mut mesh.vertices {
+        v.position = m.transform_point(v.position);
+        v.normal = m.transform_vector(v.normal).normalized();
+        let t = m.transform_vector(v.tangent.xyz()).normalized();
+        v.tangent = Vec4::new(t.x(), t.y(), t.z(), v.tangent.w());
+    }
 }
 
 #[cfg(test)]

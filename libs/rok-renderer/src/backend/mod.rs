@@ -16,6 +16,7 @@ pub(crate) mod image;
 pub(crate) mod instance;
 pub(crate) mod light;
 pub(crate) mod material;
+pub(crate) mod material_registry;
 pub(crate) mod mesh_registry;
 pub(crate) mod physical_device;
 pub(crate) mod pipeline;
